@@ -3,55 +3,92 @@ const testing = std.testing;
 
 const DeserializeError = error{
     BufferTooLong,
-    IntTooLarge,
-    UnknownType,
 };
 
-pub fn deserialize_as(comptime As: type, buffer: []const u8) !As {
-    return switch (@typeInfo(As)) {
-        .Int => |int_info| if (int_info.bits <= 64)
-            if (buffer.len <= 8)
-                std.mem.readVarInt(As, buffer, std.builtin.Endian.big)
+pub const Message = struct {
+    allocator: std.mem.Allocator,
+    buffer: []u8,
+
+    pub fn init(allocator: std.mem.Allocator, buffer: []const u8) !Message {
+        const message = Message{
+            .allocator = allocator,
+            .buffer = try allocator.alloc(u8, buffer.len),
+        };
+        @memcpy(message.buffer, buffer);
+        return message;
+    }
+
+    pub fn deinit(self: Message) void {
+        self.allocator.free(self.buffer);
+    }
+
+    pub fn unpack_as(self: Message, comptime As: type) !As {
+        return switch (@typeInfo(As)) {
+            .Int => |int_info| if (int_info.bits <= 64)
+                if (self.buffer.len <= 8)
+                    std.mem.readVarInt(As, self.buffer, std.builtin.Endian.big)
+                else
+                    DeserializeError.BufferTooLong
             else
-                DeserializeError.BufferTooLong
-        else
-            DeserializeError.IntTooLarge,
-        else => DeserializeError.UnknownType,
-    };
+                @compileError("Integer too large for msgpack. Maximum integer size is 64 bits."),
+            else => @compileError("Msgpack cannot serialize this type."),
+        };
+    }
+};
+
+// pub fn pack(allocator: std.mem.Allocator, object: anytype) []const u8 {
+//     switch (@TypeOf(object)) {
+//         .Int => |int| int.bits,
+//     }
+// }
+
+test "Deserialize u8" {
+    const message = try Message.init(testing.allocator, "\x7F");
+    defer message.deinit();
+    try testing.expect(try message.unpack_as(u9) == 0x7F);
 }
 
 test "Deserialize u32" {
-    const deadbeef_bytes = "\xDE\xAD\xBE\xEF";
-    try testing.expect(try deserialize_as(u32, deadbeef_bytes) == 0xDEADBEEF);
+    const message = try Message.init(testing.allocator, "\xDE\xAD\xBE\xEF");
+    defer message.deinit();
+    try testing.expect(try message.unpack_as(u32) == 0xDEADBEEF);
 }
 
 test "Deserialize u64" {
-    const deadbeef_bytes = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF";
-    try testing.expect(try deserialize_as(u64, deadbeef_bytes) == 0xDEADBEEFDEADBEEF);
+    const message = try Message.init(testing.allocator, "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF");
+    defer message.deinit();
+    try testing.expect(try message.unpack_as(u64) == 0xDEADBEEFDEADBEEF);
 }
 
 test "Deserialize u56" {
-    const deadbeef_bytes = "\xBE\xEF\xDE\xAD\xBE\xEF";
-    try testing.expect(try deserialize_as(u56, deadbeef_bytes) == 0xBEEFDEADBEEF);
+    const message = try Message.init(testing.allocator, "\xBE\xEF\xDE\xAD\xBE\xEF");
+    defer message.deinit();
+    try testing.expect(try message.unpack_as(u56) == 0xBEEFDEADBEEF);
 }
 
 test "Deserialize non 8-bit aligned type" {
-    const deadbeef_bytes = "\x01\xBE\xEF\xDE\xAD\xBE\xEF";
-    try testing.expect(try deserialize_as(u57, deadbeef_bytes) == 0x1BEEFDEADBEEF);
+    const message = try Message.init(testing.allocator, "\x01\xBE\xEF\xDE\xAD\xBE\xEF");
+    defer message.deinit();
+    try testing.expect(try message.unpack_as(u57) == 0x1BEEFDEADBEEF);
 }
 
-test "Deserialize IntTooLarge" {
-    const deadbeef_bytes = "\xBE\xEF\xDE\xAD\xBE\xEF";
-    try testing.expect(deserialize_as(u65, deadbeef_bytes) == DeserializeError.IntTooLarge);
-}
+// Compilation error, uncomment to test.
+// test "Deserialize IntTooLarge" {
+//     const message = try Message.init(testing.allocator, "\xBE\xEF\xDE\xAD\xBE\xEF");
+//     defer message.deinit();
+//     try testing.expect(deserialize_as(u65) == DeserializeError.IntTooLarge);
+// }
 
 test "Deserialize BufferTooLong" {
-    const deadbeef_bytes = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF";
-    try testing.expect(deserialize_as(u64, deadbeef_bytes) == DeserializeError.BufferTooLong);
+    const message = try Message.init(testing.allocator, "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF");
+    defer message.deinit();
+    try testing.expect(message.unpack_as(u64) == DeserializeError.BufferTooLong);
 }
 
-test "Deserialize UnknownType" {
-    const deadbeef_bytes = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF";
-    const UnknownStruct = struct { a: u32, b: u42 };
-    try testing.expect(deserialize_as(UnknownStruct, deadbeef_bytes) == DeserializeError.UnknownType);
-}
+// Compilation error, uncomment to test.
+// test "Deserialize UnknownType" {
+//     const message = try Message.init(testing.allocator, "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF");
+//     defer message.deinit();
+//     const UnknownStruct = struct { a: u32, b: u42 };
+//     try testing.expect(deserialize_as(UnknownStruct) == DeserializeError.UnknownType);
+// }
