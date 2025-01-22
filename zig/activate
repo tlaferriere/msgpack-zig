@@ -1,0 +1,94 @@
+# This file must be used with "source bin/activate" *from bash*
+# you cannot run it directly
+
+deactivate () {
+    # reset old environment variables
+    if [ -n "${_ZIG_OLD_PATH:-}" ] ; then
+        PATH="${_ZIG_OLD_PATH:-}"
+        export PATH
+        unset _ZIG_OLD_PATH
+    fi
+
+    # This should detect bash and zsh, which have a hash command that must
+    # be called to get it to forget past commands.  Without forgetting
+    # past commands the $PATH changes we made may not be respected
+    if [ -n "${BASH:-}" -o -n "${ZSH_VERSION:-}" ] ; then
+        hash -r 2> /dev/null
+    fi
+
+    if [ -n "${_ZIG_OLD_VIRTUAL_PS1:-}" ] ; then
+        PS1="${_ZIG_OLD_VIRTUAL_PS1:-}"
+        export PS1
+        unset _ZIG_OLD_VIRTUAL_PS1
+    fi
+
+    unset ZIG_ENV
+    unset ZIG_ENV_PROMPT
+    if [ ! "${1:-}" = "nondestructive" ] ; then
+    # Self destruct!
+        unset -f deactivate
+    fi
+}
+
+download_minisign () {
+    # Download minisign
+    curl -L https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz \
+      -o ${ZIG_ENV}/minisign.tar.gz
+    tar -xf ${ZIG_ENV}/minisign.tar.gz -C $ZIG_ENV
+    cp $ZIG_ENV/minisign-linux/x86_64/minisign $ZIG_ENV
+    rm -rf $ZIG_ENV/minisign-linux
+    chmod +x $ZIG_ENV/minisign
+    $ZIG_ENV/minisign -Vm $ZIG_ENV/minisign -P RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3
+}
+
+# unset irrelevant variables
+deactivate nondestructive
+
+ZIG_ENV=$(realpath $(dirname ${BASH_SOURCE[0]-$0}))
+echo "ZIG_ENV=$ZIG_ENV"
+export ZIG_ENV
+
+MINISIGN_VERSION=0.12
+ZIG_VERSION=0.13.0
+
+# Check that zig is installed
+if [ ! -f $ZIG_ENV/zig ]; then
+    download_minisign &
+
+    # Download zig and check it's signature before unpacking it
+    curl -L --parallel \
+        https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz \
+        -o ${ZIG_ENV}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz
+        https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz.minisig \
+        -o ${ZIG_ENV}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz.minisig
+
+    # Wait for the minisign download to finish.
+    wait
+
+    if ! $ZIG_ENV/minisign -Vm $ZIG_ENV/zig-linux-x86_64-${ZIG_VERSION}.tar.xz -P 'RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U'; then
+        echo "zig binary failed signature check!"
+        return 1
+    fi
+        
+    tar -xf zig-linux-x86_64-${ZIG_VERSION}.tar.xz -C $ZIG_ENV
+fi
+
+_ZIG_OLD_PATH="$PATH"
+PATH="$ZIG_ENV:$PATH"
+export PATH
+
+if [ -z "${ZIG_ENV_DISABLE_PROMPT:-}" ] ; then
+    _ZIG_OLD_VIRTUAL_PS1="${PS1:-}"
+    ZIG_ENV_NAME=$(basename $ZIG_ENV)
+    PS1="(${ZIG_ENV_NAME}) ${PS1:-}"
+    export PS1
+    ZIG_ENV_PROMPT="(${ZIG_ENV_NAME}) "
+    export ZIG_ENV_PROMPT
+fi
+
+# This should detect bash and zsh, which have a hash command that must
+# be called to get it to forget past commands.  Without forgetting
+# past commands the $PATH changes we made may not be respected
+if [ -n "${BASH:-}" -o -n "${ZSH_VERSION:-}" ] ; then
+    hash -r 2> /dev/null
+fi
