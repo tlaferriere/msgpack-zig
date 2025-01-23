@@ -36,11 +36,18 @@ pub const Message = struct {
     }
 };
 
-// pub fn pack(allocator: std.mem.Allocator, object: anytype) []const u8 {
-//     switch (@TypeOf(object)) {
-//         .Int => |int| int.bits,
-//     }
-// }
+pub fn pack(allocator: std.mem.Allocator, object: anytype) []const u8 {
+    const buffer = switch (@typeInfo(object)) {
+        .Int => |int| {
+            const buffer = try allocator.alloc(u8, std.math.ceil(int.bits / 8.0));
+            if (int.bits <= 7 and int.signedness == .unsigned) {
+                @memcpy(buffer, &object);
+            }
+            return buffer;
+        },
+    };
+    return buffer;
+}
 
 test "Deserialize u8" {
     const message = try Message.init(testing.allocator, "\x7F");
