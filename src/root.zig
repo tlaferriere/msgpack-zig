@@ -35,6 +35,11 @@ test "Deserialize u56" {
     try testing.expect(try deserialize_as(u56, deadbeef_bytes) == 0xBEEFDEADBEEF);
 }
 
+test "Deserialize non 8-bit aligned type" {
+    const deadbeef_bytes = "\x01\xBE\xEF\xDE\xAD\xBE\xEF";
+    try testing.expect(try deserialize_as(u57, deadbeef_bytes) == 0x1BEEFDEADBEEF);
+}
+
 test "Deserialize IntTooLarge" {
     const deadbeef_bytes = "\xBE\xEF\xDE\xAD\xBE\xEF";
     try testing.expect(deserialize_as(u65, deadbeef_bytes) == DeserializeError.IntTooLarge);
