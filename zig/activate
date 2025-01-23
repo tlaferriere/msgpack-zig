@@ -30,16 +30,6 @@ deactivate () {
     fi
 }
 
-download_minisign () {
-    # Download minisign
-    curl -L https://github.com/jedisct1/minisign/releases/download/${MINISIGN_VERSION}/minisign-${MINISIGN_VERSION}-linux.tar.gz \
-      -o ${ZIG_ENV}/minisign.tar.gz
-    tar -xf ${ZIG_ENV}/minisign.tar.gz -C $ZIG_ENV
-    cp $ZIG_ENV/minisign-linux/x86_64/minisign $ZIG_ENV
-    rm -rf $ZIG_ENV/minisign-linux
-    chmod +x $ZIG_ENV/minisign
-    $ZIG_ENV/minisign -Vm $ZIG_ENV/minisign -P RWQf6LRCGA9i53mlYecO4IzT51TGPpvWucNSCh1CBM0QTaLn73Y7GFO3
-}
 
 # unset irrelevant variables
 deactivate nondestructive
@@ -48,33 +38,32 @@ ZIG_ENV=$(realpath $(dirname ${BASH_SOURCE[0]-$0}))
 echo "ZIG_ENV=$ZIG_ENV"
 export ZIG_ENV
 
-MINISIGN_VERSION=0.12
 ZIG_VERSION=0.13.0
 
 # Check that zig is installed
-if [ ! -f $ZIG_ENV/zig ]; then
-    download_minisign &
-
+if [ ! -f $ZIG_ENV/zig-linux-x86_64-${ZIG_VERSION}/zig ]; then
     # Download zig and check it's signature before unpacking it
     curl -L --parallel \
         https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz \
         -o ${ZIG_ENV}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz
-        https://ziglang.org/download/${ZIG_VERSION}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz.minisig \
-        -o ${ZIG_ENV}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz.minisig
 
-    # Wait for the minisign download to finish.
-    wait
+    tar -xf ${ZIG_ENV}/zig-linux-x86_64-${ZIG_VERSION}.tar.xz -C $ZIG_ENV
+    chmod +x ${ZIG_ENV}/zig-linux-x86_64-${ZIG_VERSION}/zig
+fi
 
-    if ! $ZIG_ENV/minisign -Vm $ZIG_ENV/zig-linux-x86_64-${ZIG_VERSION}.tar.xz -P 'RWSGOq2NVecA2UPNdBUZykf1CCb147pkmdtYxgb3Ti+JO/wCYvhbAb/U'; then
-        echo "zig binary failed signature check!"
-        return 1
-    fi
-        
-    tar -xf zig-linux-x86_64-${ZIG_VERSION}.tar.xz -C $ZIG_ENV
+# Check that zig is installed
+if [ ! -f ${ZIG_ENV}/zls-x86_64-linux.tar.xz ]; then
+    # Download zig and check it's signature before unpacking it
+    curl -L --parallel \
+        https://github.com/zigtools/zls/releases/download/${ZIG_VERSION}/zls-x86_64-linux.tar.xz \
+        -o ${ZIG_ENV}/zls-x86_64-linux.tar.xz
+
+    tar -xf ${ZIG_ENV}/zls-x86_64-linux.tar.xz -C $ZIG_ENV
+    chmod +x ${ZIG_ENV}/zls
 fi
 
 _ZIG_OLD_PATH="$PATH"
-PATH="$ZIG_ENV:$PATH"
+PATH="$ZIG_ENV/zig-linux-x86_64-${ZIG_VERSION}:$PATH"
 export PATH
 
 if [ -z "${ZIG_ENV_DISABLE_PROMPT:-}" ] ; then
