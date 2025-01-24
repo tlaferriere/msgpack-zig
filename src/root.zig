@@ -47,10 +47,11 @@ pub const Message = struct {
                     else
                         DeserializeError.IntTooSmall,
 
-                    else => if (self.buffer[0] & 0x80 == 0)
-                        @intCast(self.buffer[0]) // Unsafe if compiler-optimized.
-                    else
-                        DeserializeError.BadCast,
+                    else => {
+                        if (self.buffer[0] & 0x80 != 0)
+                            return DeserializeError.BadCast;
+                        return @intCast(self.buffer[0]); // Unsafe if compiler-optimized.
+                    },
                 },
                 .signed => switch (self.buffer[0]) {
                     0xd1, 0xd2, 0xd3 => if (int_info.bits > 8) std.mem.readInt(
@@ -159,8 +160,9 @@ test "Deserialize IntTooSmall" {
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    const res = message.unpack_as(u56);
-    try testing.expect(res == DeserializeError.IntTooSmall);
+    const actual_error_union = message.unpack_as(u56);
+    const expected_error = DeserializeError.IntTooSmall;
+    try testing.expectError(expected_error, actual_error_union);
 }
 
 // Compilation error, uncomment to test.
