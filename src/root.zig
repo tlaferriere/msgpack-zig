@@ -54,16 +54,34 @@ pub const Message = struct {
                     },
                 },
                 .signed => switch (self.buffer[0]) {
-                    0xd1, 0xd2, 0xd3 => if (int_info.bits > 8) std.mem.readInt(
+                    0xd3 => if (int_info.bits >= 64) std.mem.readVarInt(
                         As,
-                        self.buffer[1..],
+                        self.buffer[1..9],
                         std.builtin.Endian.big,
-                    ),
-                    0xd0 => @intCast(self.buffer[1]),
-                    else => if (self.buffer[0] & 0xE0 == 0xE0)
-                        @intCast(self.buffer[0]) // Unsafe if compiler-optimized.
+                    ) else DeserializeError.IntTooSmall,
+
+                    0xd2 => if (int_info.bits >= 32) std.mem.readVarInt(
+                        As,
+                        self.buffer[1..5],
+                        std.builtin.Endian.big,
+                    ) else DeserializeError.IntTooSmall,
+
+                    0xd1 => if (int_info.bits >= 16) std.mem.readVarInt(
+                        As,
+                        self.buffer[1..3],
+                        std.builtin.Endian.big,
+                    ) else DeserializeError.IntTooSmall,
+
+                    0xd0 => if (int_info.bits >= 8)
+                        @intCast(@as(i8, @bitCast(self.buffer[1])))
                     else
-                        DeserializeError.BadCast,
+                        DeserializeError.IntTooSmall,
+
+                    else => {
+                        if (self.buffer[0] & 0xE0 != 0xE0)
+                            return DeserializeError.BadCast;
+                        return @intCast(@as(i8, @bitCast(self.buffer[0]))); // Unsafe if compiler-optimized.
+                    },
                 },
             },
             else => @compileError("Msgpack cannot serialize this type."),
@@ -90,7 +108,7 @@ test "Deserialize u7" {
         "\x7F",
     );
     defer message.deinit();
-    try testing.expect(try message.unpack_as(u7) == 0x7F);
+    try testing.expectEqual(0x7F, try message.unpack_as(u7));
 }
 
 test "Deserialize u8" {
@@ -99,7 +117,7 @@ test "Deserialize u8" {
         "\xcc\xEF",
     );
     defer message.deinit();
-    try testing.expect(try message.unpack_as(u8) == 0xEF);
+    try testing.expectEqual(0xEF, try message.unpack_as(u8));
 }
 
 test "Deserialize u16" {
@@ -108,7 +126,7 @@ test "Deserialize u16" {
         "\xcd\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expect(try message.unpack_as(u16) == 0xBEEF);
+    try testing.expectEqual(0xBEEF, try message.unpack_as(u16));
 }
 
 test "Deserialize u32" {
@@ -117,7 +135,7 @@ test "Deserialize u32" {
         "\xce\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expect(try message.unpack_as(u32) == 0xDEADBEEF);
+    try testing.expectEqual(0xDEADBEEF, try message.unpack_as(u32));
 }
 
 test "Deserialize u64" {
@@ -126,49 +144,72 @@ test "Deserialize u64" {
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expect(try message.unpack_as(u64) == 0xDEADBEEFDEADBEEF);
+    try testing.expectEqual(0xDEADBEEFDEADBEEF, try message.unpack_as(u64));
 }
 
-test "Deserialize u56" {
-    const message = try Message.init(
-        testing.allocator,
-        "\xcf\x00\x00\xBE\xEF\xDE\xAD\xBE\xEF",
-    );
-    defer message.deinit();
-    try testing.expect(try message.unpack_as(u56) == 0xBEEFDEADBEEF);
-}
-
-test "Deserialize non 8-bit aligned type" {
-    const message = try Message.init(
-        testing.allocator,
-        "\xcf\x00\x01\xBE\xEF\xDE\xAD\xBE\xEF",
-    );
-    defer message.deinit();
-    try testing.expect(try message.unpack_as(u57) == 0x1BEEFDEADBEEF);
-}
-
-// Compilation error, uncomment to test.
-// test "Deserialize IntTooLarge" {
-//     const message = try Message.init(testing.allocator, "\xBE\xEF\xDE\xAD\xBE\xEF");
-//     defer message.deinit();
-//     try testing.expect(deserialize_as(u65) == DeserializeError.IntTooLarge);
-// }
-
-test "Deserialize IntTooSmall" {
+test "Deserialize unsigned IntTooSmall" {
     const message = try Message.init(
         testing.allocator,
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    const actual_error_union = message.unpack_as(u56);
+    const actual_error_union = message.unpack_as(u32);
     const expected_error = DeserializeError.IntTooSmall;
     try testing.expectError(expected_error, actual_error_union);
 }
 
-// Compilation error, uncomment to test.
-// test "Deserialize UnknownType" {
-//     const message = try Message.init(testing.allocator, "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF");
-//     defer message.deinit();
-//     const UnknownStruct = struct { a: u32, b: u42 };
-//     try testing.expect(deserialize_as(UnknownStruct) == DeserializeError.UnknownType);
-// }
+test "Deserialize i6" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(-17, try message.unpack_as(i6));
+}
+
+test "Deserialize i8" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xd0\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(-17, try message.unpack_as(i8));
+}
+
+test "Deserialize i16" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xd1\xBE\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(-16657, try message.unpack_as(i16));
+}
+
+test "Deserialize i32" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xd2\xDE\xAD\xBE\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(-559038737, try message.unpack_as(i32));
+}
+
+test "Deserialize i64" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(-2401053088876216593, try message.unpack_as(i64));
+}
+
+test "Deserialize signed IntTooSmall" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+    );
+    defer message.deinit();
+    const actual_error_union = message.unpack_as(i32);
+    const expected_error = DeserializeError.IntTooSmall;
+    try testing.expectError(expected_error, actual_error_union);
+}
