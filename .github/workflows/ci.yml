@@ -1,4 +1,4 @@
-name: Msgpack-zig Workflow
+name: Continuous Integration
 on: [push]
 jobs:
   test:
