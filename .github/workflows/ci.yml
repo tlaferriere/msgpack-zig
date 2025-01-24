@@ -1,3 +1,5 @@
+name: Msgpack-zig Workflow
+on: [push]
 jobs:
   test:
     runs-on: ubuntu-latest
