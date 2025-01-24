@@ -28,6 +28,10 @@ pub const Message = struct {
                 0xc3 => true,
                 else => DeserializeError.WrongType,
             },
+            .Optional => |optional| switch (self.buffer[0]) {
+                0xc0 => null,
+                else => try self.unpack_as(optional.child),
+            },
             else => @compileError("Msgpack cannot serialize this type."),
         };
     }
@@ -129,6 +133,24 @@ test "Deserialize true" {
     try testing.expectEqual(true, try message.unpack_as(bool));
 }
 
+test "Deserialize optional bool: true" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xc3",
+    );
+    defer message.deinit();
+    try testing.expectEqual(true, try message.unpack_as(?bool));
+}
+
+test "Deserialize optional bool: null" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xc0",
+    );
+    defer message.deinit();
+    try testing.expectEqual(null, try message.unpack_as(?bool));
+}
+
 test "Deserialize u7" {
     const message = try Message.init(
         testing.allocator,
@@ -145,6 +167,24 @@ test "Deserialize u8" {
     );
     defer message.deinit();
     try testing.expectEqual(0xEF, try message.unpack_as(u8));
+}
+
+test "Deserialize optional u8" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xcc\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(0xEF, try message.unpack_as(?u8));
+}
+
+test "Deserialize optional u8: null" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xc0",
+    );
+    defer message.deinit();
+    try testing.expectEqual(null, try message.unpack_as(?u8));
 }
 
 test "Deserialize u16" {
