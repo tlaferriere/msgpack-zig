@@ -22,69 +22,73 @@ pub const Message = struct {
 
     pub fn unpack_as(self: Message, comptime As: type) !As {
         return switch (@typeInfo(As)) {
-            .Int => |int_info| switch (int_info.signedness) {
-                .unsigned => switch (self.buffer[0]) {
-                    0xcf => if (int_info.bits >= 64) std.mem.readVarInt(
-                        As,
-                        self.buffer[1..9],
-                        std.builtin.Endian.big,
-                    ) else DeserializeError.IntTooSmall,
+            .Int => |int_info| self.unpack_int(int_info, As),
+            else => @compileError("Msgpack cannot serialize this type."),
+        };
+    }
 
-                    0xce => if (int_info.bits >= 32) std.mem.readVarInt(
-                        As,
-                        self.buffer[1..5],
-                        std.builtin.Endian.big,
-                    ) else DeserializeError.IntTooSmall,
+    fn unpack_int(self: Message, comptime int_info: std.builtin.Type.Int, comptime As: type) !As {
+        return switch (int_info.signedness) {
+            .unsigned => switch (self.buffer[0]) {
+                0xcf => if (int_info.bits >= 64) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..9],
+                    std.builtin.Endian.big,
+                ) else DeserializeError.IntTooSmall,
 
-                    0xcd => if (int_info.bits >= 16) std.mem.readVarInt(
-                        As,
-                        self.buffer[1..3],
-                        std.builtin.Endian.big,
-                    ) else DeserializeError.IntTooSmall,
+                0xce => if (int_info.bits >= 32) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..5],
+                    std.builtin.Endian.big,
+                ) else DeserializeError.IntTooSmall,
 
-                    0xcc => if (int_info.bits >= 8)
-                        @intCast(self.buffer[1])
-                    else
-                        DeserializeError.IntTooSmall,
+                0xcd => if (int_info.bits >= 16) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..3],
+                    std.builtin.Endian.big,
+                ) else DeserializeError.IntTooSmall,
 
-                    else => {
-                        if (self.buffer[0] & 0x80 != 0)
-                            return DeserializeError.BadCast;
-                        return @intCast(self.buffer[0]); // Unsafe if compiler-optimized.
-                    },
-                },
-                .signed => switch (self.buffer[0]) {
-                    0xd3 => if (int_info.bits >= 64) std.mem.readVarInt(
-                        As,
-                        self.buffer[1..9],
-                        std.builtin.Endian.big,
-                    ) else DeserializeError.IntTooSmall,
+                0xcc => if (int_info.bits >= 8)
+                    @intCast(self.buffer[1])
+                else
+                    DeserializeError.IntTooSmall,
 
-                    0xd2 => if (int_info.bits >= 32) std.mem.readVarInt(
-                        As,
-                        self.buffer[1..5],
-                        std.builtin.Endian.big,
-                    ) else DeserializeError.IntTooSmall,
-
-                    0xd1 => if (int_info.bits >= 16) std.mem.readVarInt(
-                        As,
-                        self.buffer[1..3],
-                        std.builtin.Endian.big,
-                    ) else DeserializeError.IntTooSmall,
-
-                    0xd0 => if (int_info.bits >= 8)
-                        @intCast(@as(i8, @bitCast(self.buffer[1])))
-                    else
-                        DeserializeError.IntTooSmall,
-
-                    else => {
-                        if (self.buffer[0] & 0xE0 != 0xE0)
-                            return DeserializeError.BadCast;
-                        return @intCast(@as(i8, @bitCast(self.buffer[0]))); // Unsafe if compiler-optimized.
-                    },
+                else => {
+                    if (self.buffer[0] & 0x80 != 0)
+                        return DeserializeError.BadCast;
+                    return @intCast(self.buffer[0]); // Unsafe if compiler-optimized.
                 },
             },
-            else => @compileError("Msgpack cannot serialize this type."),
+            .signed => switch (self.buffer[0]) {
+                0xd3 => if (int_info.bits >= 64) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..9],
+                    std.builtin.Endian.big,
+                ) else DeserializeError.IntTooSmall,
+
+                0xd2 => if (int_info.bits >= 32) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..5],
+                    std.builtin.Endian.big,
+                ) else DeserializeError.IntTooSmall,
+
+                0xd1 => if (int_info.bits >= 16) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..3],
+                    std.builtin.Endian.big,
+                ) else DeserializeError.IntTooSmall,
+
+                0xd0 => if (int_info.bits >= 8)
+                    @intCast(@as(i8, @bitCast(self.buffer[1])))
+                else
+                    DeserializeError.IntTooSmall,
+
+                else => {
+                    if (self.buffer[0] & 0xE0 != 0xE0)
+                        return DeserializeError.BadCast;
+                    return @intCast(@as(i8, @bitCast(self.buffer[0]))); // Unsafe if compiler-optimized.
+                },
+            },
         };
     }
 };
