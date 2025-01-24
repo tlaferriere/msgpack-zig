@@ -1,7 +1,7 @@
 const std = @import("std");
 const testing = std.testing;
 
-const DeserializeError = error{ IntTooSmall, BadCast };
+const DeserializeError = error{ IntTooSmall, WrongType };
 
 pub const Message = struct {
     allocator: std.mem.Allocator,
@@ -23,6 +23,11 @@ pub const Message = struct {
     pub fn unpack_as(self: Message, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .Int => |int_info| self.unpack_int(int_info, As),
+            .Bool => switch (self.buffer[0]) {
+                0xc2 => false,
+                0xc3 => true,
+                else => DeserializeError.WrongType,
+            },
             else => @compileError("Msgpack cannot serialize this type."),
         };
     }
@@ -55,7 +60,7 @@ pub const Message = struct {
 
                 else => {
                     if (self.buffer[0] & 0x80 != 0)
-                        return DeserializeError.BadCast;
+                        return DeserializeError.WrongType;
                     return @intCast(self.buffer[0]); // Unsafe if compiler-optimized.
                 },
             },
@@ -85,7 +90,7 @@ pub const Message = struct {
 
                 else => {
                     if (self.buffer[0] & 0xE0 != 0xE0)
-                        return DeserializeError.BadCast;
+                        return DeserializeError.WrongType;
                     return @intCast(@as(i8, @bitCast(self.buffer[0]))); // Unsafe if compiler-optimized.
                 },
             },
@@ -104,6 +109,24 @@ pub fn pack(allocator: std.mem.Allocator, object: anytype) []const u8 {
         },
     };
     return buffer;
+}
+
+test "Deserialize false" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xc2",
+    );
+    defer message.deinit();
+    try testing.expectEqual(false, try message.unpack_as(bool));
+}
+
+test "Deserialize true" {
+    const message = try Message.init(
+        testing.allocator,
+        "\xc3",
+    );
+    defer message.deinit();
+    try testing.expectEqual(true, try message.unpack_as(bool));
 }
 
 test "Deserialize u7" {
