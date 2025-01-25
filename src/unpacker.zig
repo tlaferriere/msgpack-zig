@@ -88,6 +88,29 @@ pub const Unpacker = struct {
                 },
             },
             .signed => switch (self.buffer[0]) {
+                // Is it safe to accept a uint encoded as an int?
+                0xcf => if (int.bits > 64) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..9],
+                    Endian.big,
+                ) else DeserializeError.TypeTooSmall,
+
+                0xce => if (int.bits > 32) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..5],
+                    Endian.big,
+                ) else DeserializeError.TypeTooSmall,
+
+                0xcd => if (int.bits > 16) std.mem.readVarInt(
+                    As,
+                    self.buffer[1..3],
+                    Endian.big,
+                ) else DeserializeError.TypeTooSmall,
+
+                0xcc => if (int.bits > 8)
+                    @intCast(self.buffer[1])
+                else
+                    DeserializeError.TypeTooSmall,
                 0xd3 => if (int.bits >= 64) std.mem.readVarInt(
                     As,
                     self.buffer[1..9],
@@ -257,6 +280,15 @@ test "Deserialize i8" {
     );
     defer message.deinit();
     try testing.expectEqual(-17, try message.unpack_as(i8));
+}
+
+test "Deserialize i9 from msgpack 8-bit uint" {
+    const message = try Unpacker.init(
+        testing.allocator,
+        "\xcc\xFF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(0xFF, try message.unpack_as(i9));
 }
 
 test "Deserialize i16" {
