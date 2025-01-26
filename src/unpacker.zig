@@ -1,5 +1,7 @@
 const std = @import("std");
 
+const Marker = @import("marker.zig").Marker;
+
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
@@ -9,7 +11,10 @@ pub const Unpacker = struct {
     allocator: std.mem.Allocator,
     buffer: []u8,
 
-    pub fn init(allocator: std.mem.Allocator, buffer: []const u8) !Unpacker {
+    pub fn init(
+        allocator: std.mem.Allocator,
+        buffer: []const u8,
+    ) !Unpacker {
         const unpacker = Unpacker{
             .allocator = allocator,
             .buffer = try allocator.alloc(u8, buffer.len),
@@ -57,25 +62,25 @@ pub const Unpacker = struct {
     fn unpack_int(self: Unpacker, comptime int: Type.Int, comptime As: type) !As {
         return switch (int.signedness) {
             .unsigned => switch (self.buffer[0]) {
-                0xcf => if (int.bits >= 64) std.mem.readVarInt(
+                Marker.UINT_64 => if (int.bits >= 64) std.mem.readVarInt(
                     As,
                     self.buffer[1..9],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xce => if (int.bits >= 32) std.mem.readVarInt(
+                Marker.UINT_32 => if (int.bits >= 32) std.mem.readVarInt(
                     As,
                     self.buffer[1..5],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xcd => if (int.bits >= 16) std.mem.readVarInt(
+                Marker.UINT_16 => if (int.bits >= 16) std.mem.readVarInt(
                     As,
                     self.buffer[1..3],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xcc => if (int.bits >= 8)
+                Marker.UINT_8 => if (int.bits >= 8)
                     @intCast(self.buffer[1])
                 else
                     DeserializeError.TypeTooSmall,
@@ -89,47 +94,47 @@ pub const Unpacker = struct {
             },
             .signed => switch (self.buffer[0]) {
                 // Is it safe to accept a uint encoded as an int?
-                0xcf => if (int.bits > 64) std.mem.readVarInt(
+                Marker.UINT_64 => if (int.bits > 64) std.mem.readVarInt(
                     As,
                     self.buffer[1..9],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xce => if (int.bits > 32) std.mem.readVarInt(
+                Marker.UINT_32 => if (int.bits > 32) std.mem.readVarInt(
                     As,
                     self.buffer[1..5],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xcd => if (int.bits > 16) std.mem.readVarInt(
+                Marker.UINT_16 => if (int.bits > 16) std.mem.readVarInt(
                     As,
                     self.buffer[1..3],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xcc => if (int.bits > 8)
+                Marker.UINT_8 => if (int.bits > 8)
                     @intCast(self.buffer[1])
                 else
                     DeserializeError.TypeTooSmall,
-                0xd3 => if (int.bits >= 64) std.mem.readVarInt(
+                Marker.INT_64 => if (int.bits >= 64) std.mem.readVarInt(
                     As,
                     self.buffer[1..9],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xd2 => if (int.bits >= 32) std.mem.readVarInt(
+                Marker.INT_32 => if (int.bits >= 32) std.mem.readVarInt(
                     As,
                     self.buffer[1..5],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xd1 => if (int.bits >= 16) std.mem.readVarInt(
+                Marker.INT_16 => if (int.bits >= 16) std.mem.readVarInt(
                     As,
                     self.buffer[1..3],
                     Endian.big,
                 ) else DeserializeError.TypeTooSmall,
 
-                0xd0 => if (int.bits >= 8)
+                Marker.INT_8 => if (int.bits >= 8)
                     @intCast(@as(i8, @bitCast(self.buffer[1])))
                 else
                     DeserializeError.TypeTooSmall,
