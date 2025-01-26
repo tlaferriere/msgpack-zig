@@ -1,6 +1,6 @@
-const std = @import("std");
-const testing = std.testing;
+const unpacker = @import("unpacker.zig");
+const packer = @import("packer.zig");
 
 // Reexports
-const unpacker = @import("unpacker.zig");
 pub const Unpacker = unpacker.Unpacker;
+pub const Packer = packer.Packer;
