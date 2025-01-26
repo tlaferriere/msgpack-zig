@@ -26,8 +26,22 @@ pub const Packer = struct {
         };
     }
 
+    /// Transfer ownership of the buffer back to the caller to be transmitted.
+    ///
+    /// Remember to free the memory of the buffer.
     pub fn finish(self: Packer) []const u8 {
         return self.buffer;
+    }
+
+    test finish {
+        var packer = try Packer.init(
+            testing.allocator,
+        );
+        const val: u7 = 0x7F;
+        try packer.pack(val);
+        const actual = packer.finish();
+        defer testing.allocator.free(actual);
+        try testing.expectEqualStrings("\x7F", actual);
     }
 
     pub fn pack(self: *Packer, object: anytype) !void {
@@ -373,132 +387,123 @@ test "Serialize error TypeTooLarge" {
     );
 }
 
-// test "Serialize u8" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xcc\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(0xEF, try message.unpack_as(u8));
-// }
+test "Serialize i8 to 7-bit positive fixint" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i8 = 0x7F;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\x7F", actual);
+}
 
-// test "Serialize optional u8" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xcc\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(0xEF, try message.unpack_as(?u8));
-// }
+test "Serialize i32 to 7-bit positive fixint" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i32 = 0x7F;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\x7F", actual);
+}
 
-// test "Serialize optional u8: null" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xc0",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(null, try message.unpack_as(?u8));
-// }
+test "Serialize i8" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i8 = @bitCast(@as(u8, 0x80));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd0\x80", actual);
+}
 
-// test "Serialize u16" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xcd\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(0xBEEF, try message.unpack_as(u16));
-// }
+test "Serialize i32 to int8" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i32 = @bitCast(@as(u32, 0xFFFF_FF80));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd0\x80", actual);
+}
 
-// test "Serialize u32" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xce\xDE\xAD\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(0xDEADBEEF, try message.unpack_as(u32));
-// }
+test "Serialize i16" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i16 = @bitCast(@as(u16, 0xBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd1\xBE\xEF", actual);
+}
 
-// test "Serialize u64" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(0xDEADBEEFDEADBEEF, try message.unpack_as(u64));
-// }
+test "Serialize i32 to int16" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i32 = @bitCast(@as(u32, 0xFFFFBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd1\xBE\xEF", actual);
+}
 
-// test "Serialize unsigned TypeTooSmall" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     const actual_error_union = message.unpack_as(u32);
-//     const expected_error = SerializeError.TypeTooSmall;
-//     try testing.expectError(expected_error, actual_error_union);
-// }
+test "Serialize i32" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i32 = @bitCast(@as(u32, 0xDEADBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd2\xDE\xAD\xBE\xEF", actual);
+}
 
-// test "Serialize negative i6" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(-17, try message.unpack_as(i6));
-// }
+test "Serialize i64 to uint32" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i64 = std.math.minInt(i32);
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd2\x80\x00\x00\x00", actual);
+}
 
-// test "Serialize positive i7" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\x7F",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(0x7F, try message.unpack_as(i7));
-// }
+test "Serialize i64" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i64 = @bitCast(@as(u64, 0xDEADBEEFDEADBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
+}
 
-// test "Serialize i8" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xd0\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(-17, try message.unpack_as(i8));
-// }
+test "Serialize i128 to uint64" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i128 = @bitCast(@as(u128, 0xFFFFFFFFFFFFFFFF_DEADBEEFDEADBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
+}
 
-// test "Serialize i16" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xd1\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(-16657, try message.unpack_as(i16));
-// }
-
-// test "Serialize i32" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xd2\xDE\xAD\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(-559038737, try message.unpack_as(i32));
-// }
-
-// test "Serialize i64" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     try testing.expectEqual(-2401053088876216593, try message.unpack_as(i64));
-// }
-
-// test "Serialize signed TypeTooSmall" {
-//     const message = try Packer.init(
-//         testing.allocator,
-//         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
-//     );
-//     defer message.deinit();
-//     const actual_error_union = message.unpack_as(i32);
-//     const expected_error = SerializeError.TypeTooSmall;
-//     try testing.expectError(expected_error, actual_error_union);
-// }
+test "Serialize error TypeTooLarge with int" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: i128 = @bitCast(@as(u128, 0xFFFFFFFFFFFFFFF0_DEADBEEFDEADBEEF));
+    try testing.expectError(
+        SerializeError.TypeTooLarge,
+        packer.pack(val),
+    );
+}
