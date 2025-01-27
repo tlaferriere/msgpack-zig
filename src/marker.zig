@@ -1,4 +1,9 @@
-pub const Marker = enum {
+pub const Marker = enum(u8) {
+    pub const NIL = 0xc0;
+
+    pub const FALSE = 0xc2;
+    pub const TRUE = 0xc3;
+
     pub const UINT_8 = 0xcc;
     pub const UINT_16 = 0xcd;
     pub const UINT_32 = 0xce;

@@ -31,12 +31,12 @@ pub const Unpacker = struct {
         return switch (@typeInfo(As)) {
             .Int => |int| self.unpack_int(int, As),
             .Bool => switch (self.buffer[0]) {
-                0xc2 => false,
-                0xc3 => true,
+                Marker.FALSE => false,
+                Marker.TRUE => true,
                 else => DeserializeError.WrongType,
             },
             .Optional => |optional| switch (self.buffer[0]) {
-                0xc0 => null,
+                Marker.NIL => null,
                 else => try self.unpack_as(optional.child),
             },
             .Float => |float| self.unpack_float(float, As),

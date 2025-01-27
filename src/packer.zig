@@ -22,7 +22,7 @@ pub const Packer = struct {
     pub fn init(allocator: std.mem.Allocator) !Packer {
         return Packer{
             .allocator = allocator,
-            .buffer = try allocator.alloc(u8, 1),
+            .buffer = try allocator.alloc(u8, 0),
         };
     }
 
@@ -40,6 +40,7 @@ pub const Packer = struct {
         const val: u7 = 0x7F;
         try packer.pack(val);
         const actual = packer.finish();
+        // Don't forget this
         defer testing.allocator.free(actual);
         try testing.expectEqualStrings("\x7F", actual);
     }
@@ -48,6 +49,40 @@ pub const Packer = struct {
         errdefer self.allocator.free(self.buffer);
         return switch (@typeInfo(@TypeOf(object))) {
             .Int => self.pack_int(@TypeOf(object), object),
+            .Bool => {
+                if (!self.allocator.resize(
+                    self.buffer,
+                    self.buffer.len + 1,
+                )) {
+                    self.buffer = try self.allocator.realloc(
+                        self.buffer,
+                        self.buffer.len + 1,
+                    );
+                }
+                if (object) {
+                    self.buffer[self.offset] = Marker.TRUE;
+                } else {
+                    self.buffer[self.offset] = Marker.FALSE;
+                }
+                self.offset += 1;
+            },
+            .Optional => {
+                if (object == null) {
+                    if (!self.allocator.resize(
+                        self.buffer,
+                        self.buffer.len + 1,
+                    )) {
+                        self.buffer = try self.allocator.realloc(
+                            self.buffer,
+                            self.buffer.len + 1,
+                        );
+                    }
+                    self.buffer[self.offset] = Marker.NIL;
+                    self.offset += 1;
+                } else {
+                    try self.pack(object);
+                }
+            },
             else => @compileError("Type not serializable into msgpack."),
         };
     }
@@ -506,4 +541,59 @@ test "Serialize error TypeTooLarge with int" {
         SerializeError.TypeTooLarge,
         packer.pack(val),
     );
+}
+
+test "Serialize true" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: bool = true;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xc3", actual);
+}
+
+test "Serialize false" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: bool = false;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xc2", actual);
+}
+
+test "Serialize null" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: ?f32 = null;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xc0", actual);
+}
+
+// test "Serialize optional int" {
+//     var packer = try Packer.init(
+//         testing.allocator,
+//     );
+//     const val: ?u32 = 0xDEADBEEF;
+//     try packer.pack(val);
+//     const actual = packer.finish();
+//     defer testing.allocator.free(actual);
+//     try testing.expectEqualStrings("\xce\xDE\xAD\xBE\xEF", actual);
+// }
+
+test "Serialize optional bool" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: ?bool = true;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xc3", actual);
 }
