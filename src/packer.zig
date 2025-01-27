@@ -80,7 +80,7 @@ pub const Packer = struct {
                     self.buffer[self.offset] = Marker.NIL;
                     self.offset += 1;
                 } else {
-                    try self.pack(object);
+                    try self.pack(object.?);
                 }
             },
             else => @compileError("Type not serializable into msgpack."),
@@ -569,23 +569,23 @@ test "Serialize null" {
     var packer = try Packer.init(
         testing.allocator,
     );
-    const val: ?f32 = null;
+    const val: ?i32 = null;
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings("\xc0", actual);
 }
 
-// test "Serialize optional int" {
-//     var packer = try Packer.init(
-//         testing.allocator,
-//     );
-//     const val: ?u32 = 0xDEADBEEF;
-//     try packer.pack(val);
-//     const actual = packer.finish();
-//     defer testing.allocator.free(actual);
-//     try testing.expectEqualStrings("\xce\xDE\xAD\xBE\xEF", actual);
-// }
+test "Serialize optional int" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: ?u32 = 0xDEADBEEF;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xce\xDE\xAD\xBE\xEF", actual);
+}
 
 test "Serialize optional bool" {
     var packer = try Packer.init(
