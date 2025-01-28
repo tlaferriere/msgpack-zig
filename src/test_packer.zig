@@ -344,3 +344,14 @@ test "Serialize f64" {
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings("\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
 }
+
+test "Serialize []const u8" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "Hello, World!";
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\x5D" ++ val, actual);
+}

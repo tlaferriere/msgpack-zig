@@ -47,7 +47,8 @@ pub const Packer = struct {
 
     pub fn pack(self: *Packer, object: anytype) !void {
         errdefer self.allocator.free(self.buffer);
-        return switch (@typeInfo(@TypeOf(object))) {
+        const T = @typeInfo(@TypeOf(object));
+        return switch (T) {
             .Int => self.pack_int(@TypeOf(object), object),
             .Bool => {
                 if (!self.allocator.resize(
@@ -85,6 +86,30 @@ pub const Packer = struct {
             },
             .Float => {
                 try self.pack_float(@TypeOf(object), object);
+            },
+            .Array => |array| {
+                if (@str@typeName(T), "str") {
+                    const bytes_needed = @sizeOf(T);
+                    if (!self.allocator.resize(
+                        self.buffer,
+                        self.buffer.len + bytes_needed + 1,
+                    )) {
+                        self.buffer = try self.allocator.realloc(
+                            self.buffer,
+                            self.buffer.len + bytes_needed + 1,
+                        );
+                    }
+                    std.mem.writeInt(
+                        u8,
+                        std.mem.bytesAsValue(
+                            [1]u8,
+                            self.buffer[self.offset .. self.offset + 1],
+                        ),
+                        marker,
+                        Endian.big,
+                    );
+                    self.offset += 1;
+                }
             },
             else => @compileError("Type not serializable into msgpack."),
         };
