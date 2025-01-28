@@ -1,5 +1,6 @@
 const Packer = @import("packer.zig").Packer;
 const SerializeError = @import("packer.zig").SerializeError;
+const String = @import("packer.zig").String;
 
 const std = @import("std");
 const testing = std.testing;
@@ -345,12 +346,12 @@ test "Serialize f64" {
     try testing.expectEqualStrings("\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
 }
 
-test "Serialize []const u8" {
+test "Serialize string" {
     var packer = try Packer.init(
         testing.allocator,
     );
     const val = "Hello, World!";
-    try packer.pack(val);
+    try packer.pack(String.init(val));
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings("\x5D" ++ val, actual);

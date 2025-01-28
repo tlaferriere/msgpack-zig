@@ -6,6 +6,14 @@ const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
 pub const SerializeError = error{ TypeTooLarge, WrongType, TypeUnsupported };
 
+/// Newtype to differentiate between a string (STR) and a byte array (BIN).
+pub const String = struct {
+    str: []const u8,
+    pub fn init(str: []const u8) String {
+        return String{ .str = str };
+    }
+};
+
 /// Packer struct.
 ///
 /// Holds the in-construction msgpack buffer until it is ready to be sent.
@@ -47,8 +55,8 @@ pub const Packer = struct {
 
     pub fn pack(self: *Packer, object: anytype) !void {
         errdefer self.allocator.free(self.buffer);
-        const T = @typeInfo(@TypeOf(object));
-        return switch (T) {
+        const T = @TypeOf(object);
+        return switch (@typeInfo(T)) {
             .Int => self.pack_int(@TypeOf(object), object),
             .Bool => {
                 if (!self.allocator.resize(
@@ -87,9 +95,9 @@ pub const Packer = struct {
             .Float => {
                 try self.pack_float(@TypeOf(object), object);
             },
-            .Array => |array| {
-                if (@str@typeName(T), "str") {
-                    const bytes_needed = @sizeOf(T);
+            .Struct => {
+                if (T == String) {
+                    const bytes_needed = object.str.len;
                     if (!self.allocator.resize(
                         self.buffer,
                         self.buffer.len + bytes_needed + 1,
@@ -105,10 +113,14 @@ pub const Packer = struct {
                             [1]u8,
                             self.buffer[self.offset .. self.offset + 1],
                         ),
-                        marker,
+                        0x50 | @as(u8, @intCast(bytes_needed)),
                         Endian.big,
                     );
                     self.offset += 1;
+
+                    @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], object.str);
+                } else {
+                    std.debug.print("Pointer not supported.", .{});
                 }
             },
             else => @compileError("Type not serializable into msgpack."),
