@@ -4,7 +4,7 @@ const Marker = @import("marker.zig").Marker;
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
-const SerializeError = error{ TypeTooLarge, WrongType };
+const SerializeError = error{ TypeTooLarge, WrongType, TypeUnsupported };
 
 /// Packer struct.
 ///
@@ -83,33 +83,53 @@ pub const Packer = struct {
                     try self.pack(object.?);
                 }
             },
+            .Float => {
+                try self.pack_float(@TypeOf(object), object);
+            },
             else => @compileError("Type not serializable into msgpack."),
         };
     }
 
-    fn pack_float(self: *Packer, comptime float: Type.Float, comptime As: type) !As {
-        switch (self.buffer[0]) {
-            0xca => if (float.bits >= 32)
-                @as(As, @floatCast(
-                    @as(f32, @bitCast(std.mem.readVarInt(
-                        u32,
-                        self.buffer[1..5],
-                        Endian.big,
-                    ))),
-                ))
-            else
-                SerializeError.FloatTooSmall,
-            0xcb => if (float.bits >= 64)
-                @as(As, @floatCast(
-                    @as(f64, @bitCast(std.mem.readVarInt(
-                        u64,
-                        self.buffer[1..9],
-                        Endian.big,
-                    ))),
-                ))
-            else
-                SerializeError.FloatTooSmall,
+    fn pack_float(self: *Packer, comptime T: type, value: T) !void {
+        const marker = switch (@typeInfo(T).Float.bits) {
+            32 => Marker.FLOAT_32,
+            64 => Marker.FLOAT_64,
+            else => return SerializeError.TypeUnsupported,
+        };
+
+        const bytes_needed = @sizeOf(T);
+        if (!self.allocator.resize(
+            self.buffer,
+            self.buffer.len + bytes_needed + 1,
+        )) {
+            self.buffer = try self.allocator.realloc(
+                self.buffer,
+                self.buffer.len + bytes_needed + 1,
+            );
         }
+        std.mem.writeInt(
+            u8,
+            std.mem.bytesAsValue(
+                [1]u8,
+                self.buffer[self.offset .. self.offset + 1],
+            ),
+            marker,
+            Endian.big,
+        );
+        self.offset += 1;
+
+        comptime var type_info = @typeInfo(u32);
+        type_info.Int.bits = bytes_needed * 8;
+        const OutType = @Type(type_info);
+        std.mem.writeInt(
+            OutType,
+            std.mem.bytesAsValue(
+                [bytes_needed]u8,
+                self.buffer[self.offset .. self.offset + bytes_needed],
+            ),
+            @bitCast(value),
+            Endian.big,
+        );
     }
 
     fn pack_int(self: *Packer, comptime T: type, object: T) !void {
@@ -596,4 +616,26 @@ test "Serialize optional bool" {
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings("\xc3", actual);
+}
+
+test "Serialize f32" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: f32 = @bitCast(@as(u32, 0xDEADBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xca\xDE\xAD\xBE\xEF", actual);
+}
+
+test "Serialize f64" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: f64 = @bitCast(@as(u64, 0xDEADBEEFDEADBEEF));
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings("\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
 }
