@@ -44,22 +44,41 @@ pub const Unpacker = struct {
         };
     }
 
-    fn unpack_float(self: Unpacker, comptime float: Type.Float, comptime As: type) !As {
-        switch (self.buffer[0]) {
-            0xca => if (float.bits >= 32) @as(As, @floatCast(@as(f32, @bitCast(std.mem.readVarInt(
-                u32,
-                self.buffer[1..5],
-                Endian.big,
-            ))))) else DeserializeError.FloatTooSmall,
-            0xcb => if (float.bits >= 64) @as(As, @floatCast(@as(f64, @bitCast(std.mem.readVarInt(
-                u64,
-                self.buffer[1..9],
-                Endian.big,
-            ))))) else DeserializeError.FloatTooSmall,
-        }
+    fn unpack_float(
+        self: Unpacker,
+        comptime float: Type.Float,
+        comptime As: type,
+    ) !As {
+        return switch (self.buffer[0]) {
+            0xca => if (float.bits >= 32) @as(
+                As,
+                @floatCast(
+                    @as(f32, @bitCast(std.mem.readVarInt(
+                        u32,
+                        self.buffer[1..5],
+                        Endian.big,
+                    ))),
+                ),
+            ) else DeserializeError.TypeTooSmall,
+            0xcb => if (float.bits >= 64) @as(
+                As,
+                @floatCast(
+                    @as(f64, @bitCast(std.mem.readVarInt(
+                        u64,
+                        self.buffer[1..9],
+                        Endian.big,
+                    ))),
+                ),
+            ) else DeserializeError.TypeTooSmall,
+            else => DeserializeError.WrongType,
+        };
     }
 
-    fn unpack_int(self: Unpacker, comptime int: Type.Int, comptime As: type) !As {
+    fn unpack_int(
+        self: Unpacker,
+        comptime int: Type.Int,
+        comptime As: type,
+    ) !As {
         return switch (int.signedness) {
             .unsigned => switch (self.buffer[0]) {
                 Marker.UINT_64 => if (int.bits >= 64) std.mem.readVarInt(
@@ -140,7 +159,8 @@ pub const Unpacker = struct {
                     DeserializeError.TypeTooSmall,
 
                 else => {
-                    if (self.buffer[0] & 0xE0 != 0xE0 and self.buffer[0] & 0x80 != 0)
+                    if (self.buffer[0] & 0xE0 != 0xE0 and
+                        self.buffer[0] & 0x80 != 0)
                         return DeserializeError.WrongType;
                     // Fixint
                     return @intCast(@as(i8, @bitCast(self.buffer[0]))); // Unsafe if compiler-optimized.
@@ -156,7 +176,10 @@ test "Deserialize false" {
         "\xc2",
     );
     defer message.deinit();
-    try testing.expectEqual(false, try message.unpack_as(bool));
+    try testing.expectEqual(
+        false,
+        try message.unpack_as(bool),
+    );
 }
 
 test "Deserialize true" {
@@ -165,7 +188,10 @@ test "Deserialize true" {
         "\xc3",
     );
     defer message.deinit();
-    try testing.expectEqual(true, try message.unpack_as(bool));
+    try testing.expectEqual(
+        true,
+        try message.unpack_as(bool),
+    );
 }
 
 test "Deserialize optional bool: true" {
@@ -174,7 +200,10 @@ test "Deserialize optional bool: true" {
         "\xc3",
     );
     defer message.deinit();
-    try testing.expectEqual(true, try message.unpack_as(?bool));
+    try testing.expectEqual(
+        true,
+        try message.unpack_as(?bool),
+    );
 }
 
 test "Deserialize optional bool: null" {
@@ -183,7 +212,10 @@ test "Deserialize optional bool: null" {
         "\xc0",
     );
     defer message.deinit();
-    try testing.expectEqual(null, try message.unpack_as(?bool));
+    try testing.expectEqual(
+        null,
+        try message.unpack_as(?bool),
+    );
 }
 
 test "Deserialize u7" {
@@ -192,7 +224,10 @@ test "Deserialize u7" {
         "\x7F",
     );
     defer message.deinit();
-    try testing.expectEqual(0x7F, try message.unpack_as(u7));
+    try testing.expectEqual(
+        0x7F,
+        try message.unpack_as(u7),
+    );
 }
 
 test "Deserialize u8" {
@@ -201,7 +236,10 @@ test "Deserialize u8" {
         "\xcc\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(0xEF, try message.unpack_as(u8));
+    try testing.expectEqual(
+        0xEF,
+        try message.unpack_as(u8),
+    );
 }
 
 test "Deserialize optional u8" {
@@ -210,7 +248,10 @@ test "Deserialize optional u8" {
         "\xcc\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(0xEF, try message.unpack_as(?u8));
+    try testing.expectEqual(
+        0xEF,
+        try message.unpack_as(?u8),
+    );
 }
 
 test "Deserialize optional u8: null" {
@@ -219,7 +260,10 @@ test "Deserialize optional u8: null" {
         "\xc0",
     );
     defer message.deinit();
-    try testing.expectEqual(null, try message.unpack_as(?u8));
+    try testing.expectEqual(
+        null,
+        try message.unpack_as(?u8),
+    );
 }
 
 test "Deserialize u16" {
@@ -228,7 +272,10 @@ test "Deserialize u16" {
         "\xcd\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(0xBEEF, try message.unpack_as(u16));
+    try testing.expectEqual(
+        0xBEEF,
+        try message.unpack_as(u16),
+    );
 }
 
 test "Deserialize u32" {
@@ -237,7 +284,10 @@ test "Deserialize u32" {
         "\xce\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(0xDEADBEEF, try message.unpack_as(u32));
+    try testing.expectEqual(
+        0xDEADBEEF,
+        try message.unpack_as(u32),
+    );
 }
 
 test "Deserialize u64" {
@@ -246,7 +296,10 @@ test "Deserialize u64" {
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(0xDEADBEEFDEADBEEF, try message.unpack_as(u64));
+    try testing.expectEqual(
+        0xDEADBEEFDEADBEEF,
+        try message.unpack_as(u64),
+    );
 }
 
 test "Deserialize unsigned TypeTooSmall" {
@@ -257,7 +310,10 @@ test "Deserialize unsigned TypeTooSmall" {
     defer message.deinit();
     const actual_error_union = message.unpack_as(u32);
     const expected_error = DeserializeError.TypeTooSmall;
-    try testing.expectError(expected_error, actual_error_union);
+    try testing.expectError(
+        expected_error,
+        actual_error_union,
+    );
 }
 
 test "Deserialize negative i6" {
@@ -266,7 +322,10 @@ test "Deserialize negative i6" {
         "\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(-17, try message.unpack_as(i6));
+    try testing.expectEqual(
+        -17,
+        try message.unpack_as(i6),
+    );
 }
 
 test "Deserialize one-byte positive i8" {
@@ -275,7 +334,10 @@ test "Deserialize one-byte positive i8" {
         "\x7F",
     );
     defer message.deinit();
-    try testing.expectEqual(0x7F, try message.unpack_as(i8));
+    try testing.expectEqual(
+        0x7F,
+        try message.unpack_as(i8),
+    );
 }
 
 test "Deserialize i8" {
@@ -284,7 +346,10 @@ test "Deserialize i8" {
         "\xd0\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(-17, try message.unpack_as(i8));
+    try testing.expectEqual(
+        -17,
+        try message.unpack_as(i8),
+    );
 }
 
 test "Deserialize i9 from msgpack 8-bit uint" {
@@ -293,7 +358,10 @@ test "Deserialize i9 from msgpack 8-bit uint" {
         "\xcc\xFF",
     );
     defer message.deinit();
-    try testing.expectEqual(0xFF, try message.unpack_as(i9));
+    try testing.expectEqual(
+        0xFF,
+        try message.unpack_as(i9),
+    );
 }
 
 test "Deserialize i16" {
@@ -302,7 +370,10 @@ test "Deserialize i16" {
         "\xd1\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(-16657, try message.unpack_as(i16));
+    try testing.expectEqual(
+        -16657,
+        try message.unpack_as(i16),
+    );
 }
 
 test "Deserialize i32" {
@@ -311,7 +382,10 @@ test "Deserialize i32" {
         "\xd2\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(-559038737, try message.unpack_as(i32));
+    try testing.expectEqual(
+        -559038737,
+        try message.unpack_as(i32),
+    );
 }
 
 test "Deserialize i64" {
@@ -320,7 +394,10 @@ test "Deserialize i64" {
         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
     );
     defer message.deinit();
-    try testing.expectEqual(-2401053088876216593, try message.unpack_as(i64));
+    try testing.expectEqual(
+        -2401053088876216593,
+        try message.unpack_as(i64),
+    );
 }
 
 test "Deserialize signed TypeTooSmall" {
@@ -331,5 +408,32 @@ test "Deserialize signed TypeTooSmall" {
     defer message.deinit();
     const actual_error_union = message.unpack_as(i32);
     const expected_error = DeserializeError.TypeTooSmall;
-    try testing.expectError(expected_error, actual_error_union);
+    try testing.expectError(
+        expected_error,
+        actual_error_union,
+    );
+}
+
+test "Deserialize f64" {
+    const message = try Unpacker.init(
+        testing.allocator,
+        "\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(
+        @as(f64, @bitCast(@as(u64, 0xDEADBEEF_DEADBEEF))),
+        try message.unpack_as(f64),
+    );
+}
+
+test "Deserialize f32" {
+    const message = try Unpacker.init(
+        testing.allocator,
+        "\xca\xDE\xAD\xBE\xEF",
+    );
+    defer message.deinit();
+    try testing.expectEqual(
+        @as(f32, @bitCast(@as(u32, 0xDEADBEEF))),
+        try message.unpack_as(f32),
+    );
 }
