@@ -5,7 +5,7 @@ const Unpacker = @import("unpacker.zig").Unpacker;
 const DeserializeError = @import("unpacker.zig").DeserializeError;
 
 test "Deserialize false" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xc2",
         0,
     );
@@ -16,7 +16,7 @@ test "Deserialize false" {
 }
 
 test "Deserialize true" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xc3",
         0,
     );
@@ -27,7 +27,7 @@ test "Deserialize true" {
 }
 
 test "Deserialize optional bool: true" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xc3",
         0,
     );
@@ -38,7 +38,7 @@ test "Deserialize optional bool: true" {
 }
 
 test "Deserialize optional bool: null" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xc0",
         0,
     );
@@ -49,7 +49,7 @@ test "Deserialize optional bool: null" {
 }
 
 test "Deserialize u7" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\x7F",
         0,
     );
@@ -60,7 +60,7 @@ test "Deserialize u7" {
 }
 
 test "Deserialize u8" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcc\xEF",
         0,
     );
@@ -71,7 +71,7 @@ test "Deserialize u8" {
 }
 
 test "Deserialize optional u8" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcc\xEF",
         0,
     );
@@ -82,7 +82,7 @@ test "Deserialize optional u8" {
 }
 
 test "Deserialize optional u8: null" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xc0",
         0,
     );
@@ -93,7 +93,7 @@ test "Deserialize optional u8: null" {
 }
 
 test "Deserialize u16" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcd\xBE\xEF",
         0,
     );
@@ -104,7 +104,7 @@ test "Deserialize u16" {
 }
 
 test "Deserialize u32" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xce\xDE\xAD\xBE\xEF",
         0,
     );
@@ -115,7 +115,7 @@ test "Deserialize u32" {
 }
 
 test "Deserialize u64" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -126,7 +126,7 @@ test "Deserialize u64" {
 }
 
 test "Deserialize unsigned TypeTooSmall" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -139,7 +139,7 @@ test "Deserialize unsigned TypeTooSmall" {
 }
 
 test "Deserialize negative i6" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xEF",
         0,
     );
@@ -150,7 +150,7 @@ test "Deserialize negative i6" {
 }
 
 test "Deserialize one-byte positive i8" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\x7F",
         0,
     );
@@ -161,7 +161,7 @@ test "Deserialize one-byte positive i8" {
 }
 
 test "Deserialize i8" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xd0\xEF",
         0,
     );
@@ -172,7 +172,7 @@ test "Deserialize i8" {
 }
 
 test "Deserialize i9 from msgpack 8-bit uint" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcc\xFF",
         0,
     );
@@ -183,7 +183,7 @@ test "Deserialize i9 from msgpack 8-bit uint" {
 }
 
 test "Deserialize i16" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xd1\xBE\xEF",
         0,
     );
@@ -194,7 +194,7 @@ test "Deserialize i16" {
 }
 
 test "Deserialize i32" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xd2\xDE\xAD\xBE\xEF",
         0,
     );
@@ -205,7 +205,7 @@ test "Deserialize i32" {
 }
 
 test "Deserialize i64" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -216,7 +216,7 @@ test "Deserialize i64" {
 }
 
 test "Deserialize signed TypeTooSmall" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -229,7 +229,7 @@ test "Deserialize signed TypeTooSmall" {
 }
 
 test "Deserialize f64" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -240,7 +240,7 @@ test "Deserialize f64" {
 }
 
 test "Deserialize f32" {
-    const message = try Unpacker.init(
+    var message = try Unpacker.init(
         "\xca\xDE\xAD\xBE\xEF",
         0,
     );
