@@ -9,7 +9,7 @@ pub const DeserializeError = error{ TypeTooSmall, WrongType };
 
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
-    buffer: []u8,
+    buffer: []const u8,
 
     pub fn init(
         allocator: std.mem.Allocator,
@@ -17,14 +17,9 @@ pub const Unpacker = struct {
     ) !Unpacker {
         const unpacker = Unpacker{
             .allocator = allocator,
-            .buffer = try allocator.alloc(u8, buffer.len),
+            .buffer = buffer,
         };
-        @memcpy(unpacker.buffer, buffer);
         return unpacker;
-    }
-
-    pub fn deinit(self: Unpacker) void {
-        self.allocator.free(self.buffer);
     }
 
     pub fn unpack_as(self: Unpacker, comptime As: type) !As {
