@@ -6,6 +6,7 @@ const DeserializeError = @import("unpacker.zig").DeserializeError;
 
 test "Deserialize false" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xc2",
         0,
     );
@@ -17,6 +18,7 @@ test "Deserialize false" {
 
 test "Deserialize true" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xc3",
         0,
     );
@@ -28,6 +30,7 @@ test "Deserialize true" {
 
 test "Deserialize optional bool: true" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xc3",
         0,
     );
@@ -39,6 +42,7 @@ test "Deserialize optional bool: true" {
 
 test "Deserialize optional bool: null" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xc0",
         0,
     );
@@ -50,6 +54,7 @@ test "Deserialize optional bool: null" {
 
 test "Deserialize u7" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\x7F",
         0,
     );
@@ -61,6 +66,7 @@ test "Deserialize u7" {
 
 test "Deserialize u8" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcc\xEF",
         0,
     );
@@ -72,6 +78,7 @@ test "Deserialize u8" {
 
 test "Deserialize optional u8" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcc\xEF",
         0,
     );
@@ -83,6 +90,7 @@ test "Deserialize optional u8" {
 
 test "Deserialize optional u8: null" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xc0",
         0,
     );
@@ -94,6 +102,7 @@ test "Deserialize optional u8: null" {
 
 test "Deserialize u16" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcd\xBE\xEF",
         0,
     );
@@ -105,6 +114,7 @@ test "Deserialize u16" {
 
 test "Deserialize u32" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xce\xDE\xAD\xBE\xEF",
         0,
     );
@@ -116,6 +126,7 @@ test "Deserialize u32" {
 
 test "Deserialize u64" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -127,6 +138,7 @@ test "Deserialize u64" {
 
 test "Deserialize unsigned TypeTooSmall" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -140,6 +152,7 @@ test "Deserialize unsigned TypeTooSmall" {
 
 test "Deserialize negative i6" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xEF",
         0,
     );
@@ -151,6 +164,7 @@ test "Deserialize negative i6" {
 
 test "Deserialize one-byte positive i8" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\x7F",
         0,
     );
@@ -162,6 +176,7 @@ test "Deserialize one-byte positive i8" {
 
 test "Deserialize i8" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xd0\xEF",
         0,
     );
@@ -173,6 +188,7 @@ test "Deserialize i8" {
 
 test "Deserialize i9 from msgpack 8-bit uint" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcc\xFF",
         0,
     );
@@ -184,6 +200,7 @@ test "Deserialize i9 from msgpack 8-bit uint" {
 
 test "Deserialize i16" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xd1\xBE\xEF",
         0,
     );
@@ -195,6 +212,7 @@ test "Deserialize i16" {
 
 test "Deserialize i32" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xd2\xDE\xAD\xBE\xEF",
         0,
     );
@@ -206,6 +224,7 @@ test "Deserialize i32" {
 
 test "Deserialize i64" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -217,6 +236,7 @@ test "Deserialize i64" {
 
 test "Deserialize signed TypeTooSmall" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -230,6 +250,7 @@ test "Deserialize signed TypeTooSmall" {
 
 test "Deserialize f64" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         0,
     );
@@ -241,11 +262,25 @@ test "Deserialize f64" {
 
 test "Deserialize f32" {
     var message = try Unpacker.init(
+        testing.allocator,
         "\xca\xDE\xAD\xBE\xEF",
         0,
     );
     try testing.expectEqual(
         @as(f32, @bitCast(@as(u32, 0xDEADBEEF))),
         try message.unpack_as(f32),
+    );
+}
+
+test "Deserialize fixstr" {
+    const val = "Hello, World!";
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\x5d" ++ val,
+        0,
+    );
+    try testing.expectEqualStrings(
+        val,
+        try message.unpack_as([]const u8),
     );
 }

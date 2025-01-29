@@ -8,14 +8,17 @@ const Type = std.builtin.Type;
 pub const DeserializeError = error{ TypeTooSmall, WrongType, Finished };
 
 pub const Unpacker = struct {
+    allocator: std.mem.Allocator,
     buffer: []const u8,
     offset: usize,
 
     pub fn init(
+        allocator: std.mem.Allocator,
         buffer: []const u8,
         offset: usize,
     ) !Unpacker {
         return Unpacker{
+            .allocator = allocator,
             .buffer = buffer,
             .offset = offset,
         };
@@ -43,7 +46,14 @@ pub const Unpacker = struct {
                 else => try self.unpack_as(optional.child),
             },
             .Float => |float| self.unpack_float(float, As),
-            else => @compileError("Msgpack cannot serialize this type."),
+            .Pointer => |pointer| if (pointer.size == .Slice and pointer.child == u8) {
+                return self.unpack_string(As);
+            },
+            else => {
+                @compileLog(As);
+                @compileLog(@typeInfo(As));
+                @compileError("Msgpack cannot serialize this type.");
+            },
         };
     }
 
@@ -192,4 +202,10 @@ pub const Unpacker = struct {
             },
         };
     }
+
+    // fn unpack_string(self: *Unpacker, comptime As: type) !As {
+    //     switch (self.buffer[self.offset]) {
+    //         else => if ()
+    //     }
+    // }
 };
