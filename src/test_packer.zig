@@ -156,7 +156,10 @@ test "Serialize i8 to 7-bit positive fixint" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\x7F", actual);
+    try testing.expectEqualStrings(
+        "\x7F",
+        actual,
+    );
 }
 
 test "Serialize i32 to 7-bit positive fixint" {
@@ -167,7 +170,10 @@ test "Serialize i32 to 7-bit positive fixint" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\x7F", actual);
+    try testing.expectEqualStrings(
+        "\x7F",
+        actual,
+    );
 }
 
 test "Serialize i8" {
@@ -178,7 +184,10 @@ test "Serialize i8" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd0\x80", actual);
+    try testing.expectEqualStrings(
+        "\xd0\x80",
+        actual,
+    );
 }
 
 test "Serialize i32 to int8" {
@@ -189,7 +198,10 @@ test "Serialize i32 to int8" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd0\x80", actual);
+    try testing.expectEqualStrings(
+        "\xd0\x80",
+        actual,
+    );
 }
 
 test "Serialize i16" {
@@ -200,7 +212,10 @@ test "Serialize i16" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd1\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xd1\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize i32 to int16" {
@@ -211,7 +226,10 @@ test "Serialize i32 to int16" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd1\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xd1\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize i32" {
@@ -222,7 +240,10 @@ test "Serialize i32" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd2\xDE\xAD\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xd2\xDE\xAD\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize i64 to uint32" {
@@ -233,7 +254,10 @@ test "Serialize i64 to uint32" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd2\x80\x00\x00\x00", actual);
+    try testing.expectEqualStrings(
+        "\xd2\x80\x00\x00\x00",
+        actual,
+    );
 }
 
 test "Serialize i64" {
@@ -244,25 +268,37 @@ test "Serialize i64" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize i128 to uint64" {
     var packer = try Packer.init(
         testing.allocator,
     );
-    const val: i128 = @bitCast(@as(u128, 0xFFFFFFFFFFFFFFFF_DEADBEEFDEADBEEF));
+    const val: i128 = @bitCast(@as(
+        u128,
+        0xFFFFFFFFFFFFFFFF_DEADBEEFDEADBEEF,
+    ));
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize error TypeTooLarge with int" {
     var packer = try Packer.init(
         testing.allocator,
     );
-    const val: i128 = @bitCast(@as(u128, 0xFFFFFFFFFFFFFFF0_DEADBEEFDEADBEEF));
+    const val: i128 = @bitCast(@as(
+        u128,
+        0xFFFFFFFFFFFFFFF0_DEADBEEFDEADBEEF,
+    ));
     try testing.expectError(
         SerializeError.TypeTooLarge,
         packer.pack(val),
@@ -277,7 +313,10 @@ test "Serialize true" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xc3", actual);
+    try testing.expectEqualStrings(
+        "\xc3",
+        actual,
+    );
 }
 
 test "Serialize false" {
@@ -288,7 +327,10 @@ test "Serialize false" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xc2", actual);
+    try testing.expectEqualStrings(
+        "\xc2",
+        actual,
+    );
 }
 
 test "Serialize null" {
@@ -299,7 +341,10 @@ test "Serialize null" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xc0", actual);
+    try testing.expectEqualStrings(
+        "\xc0",
+        actual,
+    );
 }
 
 test "Serialize optional int" {
@@ -310,7 +355,10 @@ test "Serialize optional int" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xce\xDE\xAD\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xce\xDE\xAD\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize optional bool" {
@@ -321,7 +369,10 @@ test "Serialize optional bool" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xc3", actual);
+    try testing.expectEqualStrings(
+        "\xc3",
+        actual,
+    );
 }
 
 test "Serialize f32" {
@@ -404,6 +455,48 @@ test "Serialize 32-bit length string" {
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
         "\xdb" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 8-bit length binary string" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 32;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc4" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 16-bit length binary string" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 256;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc5" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 32-bit length binary string" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 65536;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc6" ++ val,
         actual,
     );
 }

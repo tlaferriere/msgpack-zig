@@ -102,44 +102,51 @@ pub const Packer = struct {
             },
             .Struct => {
                 if (T == String) {
-                    const bytes_needed = object.str.len;
-                    if (!self.allocator.resize(
-                        self.buffer,
-                        self.buffer.len + bytes_needed + 1,
-                    )) {
-                        self.buffer = try self.allocator.realloc(
-                            self.buffer,
-                            self.buffer.len + bytes_needed + 1,
-                        );
-                    }
-                    const marker: u8 = if (bytes_needed < std.math.maxInt(u5))
-                        (0x50 | @as(u8, @intCast(bytes_needed)))
-                    else if (bytes_needed < std.math.maxInt(u8))
-                        Marker.STR_8
-                    else if (bytes_needed < std.math.maxInt(u16))
-                        Marker.STR_16
-                    else if (bytes_needed < std.math.maxInt(u32))
-                        Marker.STR_32
-                    else
-                        return SerializeError.StringTooLarge;
-
-                    std.mem.writeInt(
-                        u8,
-                        std.mem.bytesAsValue(
-                            [1]u8,
-                            self.buffer[self.offset .. self.offset + 1],
-                        ),
-                        marker,
-                        Endian.big,
-                    );
-                    self.offset += 1;
-
-                    @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], object.str);
+                    try self.pack_string(object);
                 } else {
                     std.debug.print("Pointer not supported.", .{});
                 }
             },
-            else => @compileError("Type not serializable into msgpack."),
+            .Array => {},
+            .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8) {
+                const bytes_needed = object.len;
+                if (!self.allocator.resize(
+                    self.buffer,
+                    self.buffer.len + bytes_needed + 1,
+                )) {
+                    self.buffer = try self.allocator.realloc(
+                        self.buffer,
+                        self.buffer.len + bytes_needed + 1,
+                    );
+                }
+                const marker: u8 = if (bytes_needed < std.math.maxInt(u8))
+                    Marker.BIN_8
+                else if (bytes_needed < std.math.maxInt(u16))
+                    Marker.BIN_16
+                else if (bytes_needed < std.math.maxInt(u32))
+                    Marker.BIN_32
+                else
+                    return SerializeError.StringTooLarge;
+
+                std.mem.writeInt(
+                    u8,
+                    std.mem.bytesAsValue(
+                        [1]u8,
+                        self.buffer[self.offset .. self.offset + 1],
+                    ),
+                    marker,
+                    Endian.big,
+                );
+                self.offset += 1;
+
+                @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], object);
+            } else {
+                self.pack(object.*);
+            },
+            else => {
+                @compileLog(T);
+                @compileError("Type not serializable into msgpack.");
+            },
         };
     }
 
@@ -334,6 +341,42 @@ pub const Packer = struct {
             },
             else => unreachable,
         }
+    }
+
+    fn pack_string(self: *Packer, object: String) !void {
+        const bytes_needed = object.str.len;
+        if (!self.allocator.resize(
+            self.buffer,
+            self.buffer.len + bytes_needed + 1,
+        )) {
+            self.buffer = try self.allocator.realloc(
+                self.buffer,
+                self.buffer.len + bytes_needed + 1,
+            );
+        }
+        const marker: u8 = if (bytes_needed < std.math.maxInt(u5))
+            (0x50 | @as(u8, @intCast(bytes_needed)))
+        else if (bytes_needed < std.math.maxInt(u8))
+            Marker.STR_8
+        else if (bytes_needed < std.math.maxInt(u16))
+            Marker.STR_16
+        else if (bytes_needed < std.math.maxInt(u32))
+            Marker.STR_32
+        else
+            return SerializeError.StringTooLarge;
+
+        std.mem.writeInt(
+            u8,
+            std.mem.bytesAsValue(
+                [1]u8,
+                self.buffer[self.offset .. self.offset + 1],
+            ),
+            marker,
+            Endian.big,
+        );
+        self.offset += 1;
+
+        @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], object.str);
     }
 
     fn int_packed_size(comptime T: type, value: T) !usize {
