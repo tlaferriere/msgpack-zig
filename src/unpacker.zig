@@ -8,18 +8,17 @@ const Type = std.builtin.Type;
 pub const DeserializeError = error{ TypeTooSmall, WrongType };
 
 pub const Unpacker = struct {
-    allocator: std.mem.Allocator,
     buffer: []const u8,
+    offset: usize,
 
     pub fn init(
-        allocator: std.mem.Allocator,
         buffer: []const u8,
+        offset: usize,
     ) !Unpacker {
-        const unpacker = Unpacker{
-            .allocator = allocator,
+        return Unpacker{
             .buffer = buffer,
+            .offset = offset,
         };
-        return unpacker;
     }
 
     pub fn unpack_as(self: Unpacker, comptime As: type) !As {

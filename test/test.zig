@@ -14,8 +14,8 @@ test "u7 round-trip" {
     defer testing.allocator.free(packed_message);
 
     const message = try msgpack.Unpacker.init(
-        testing.allocator,
         packed_message,
+        0,
     );
     try testing.expectEqual(val, try message.unpack_as(u7));
 }
@@ -30,8 +30,8 @@ test "i8 round-trip" {
     defer testing.allocator.free(packed_message);
 
     const message = try msgpack.Unpacker.init(
-        testing.allocator,
         packed_message,
+        0,
     );
     try testing.expectEqual(val, try message.unpack_as(i8));
 }
@@ -46,8 +46,8 @@ test "null round-trip" {
     defer testing.allocator.free(packed_message);
 
     const message = try msgpack.Unpacker.init(
-        testing.allocator,
         packed_message,
+        0,
     );
     try testing.expectEqual(val, try message.unpack_as(?i8));
 }
@@ -62,8 +62,8 @@ test "optional bool round-trip" {
     defer testing.allocator.free(packed_message);
 
     const message = try msgpack.Unpacker.init(
-        testing.allocator,
         packed_message,
+        0,
     );
     try testing.expectEqual(val, try message.unpack_as(?bool));
 }
@@ -78,8 +78,8 @@ test "float round-trip" {
     defer testing.allocator.free(packed_message);
 
     const message = try msgpack.Unpacker.init(
-        testing.allocator,
         packed_message,
+        0,
     );
     try testing.expectEqual(val, try message.unpack_as(f32));
 }
