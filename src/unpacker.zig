@@ -24,7 +24,7 @@ pub const Unpacker = struct {
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .Int => |int| self.unpack_int(int, As),
-            .Bool => switch (self.buffer[0]) {
+            .Bool => switch (self.buffer[self.offset]) {
                 Marker.FALSE => {
                     self.offset += 1;
                     return false;
@@ -35,7 +35,7 @@ pub const Unpacker = struct {
                 },
                 else => DeserializeError.WrongType,
             },
-            .Optional => |optional| switch (self.buffer[0]) {
+            .Optional => |optional| switch (self.buffer[self.offset]) {
                 Marker.NIL => {
                     self.offset += 1;
                     return null;
