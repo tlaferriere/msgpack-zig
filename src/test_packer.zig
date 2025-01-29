@@ -332,7 +332,10 @@ test "Serialize f32" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xca\xDE\xAD\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xca\xDE\xAD\xBE\xEF",
+        actual,
+    );
 }
 
 test "Serialize f64" {
@@ -343,10 +346,13 @@ test "Serialize f64" {
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
+    try testing.expectEqualStrings(
+        "\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        actual,
+    );
 }
 
-test "Serialize string" {
+test "Serialize fixstr" {
     var packer = try Packer.init(
         testing.allocator,
     );
@@ -354,5 +360,50 @@ test "Serialize string" {
     try packer.pack(String.init(val));
     const actual = packer.finish();
     defer testing.allocator.free(actual);
-    try testing.expectEqualStrings("\x5D" ++ val, actual);
+    try testing.expectEqualStrings(
+        "\x5D" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 8-bit length string" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 32;
+    try packer.pack(String.init(val));
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd9" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 16-bit length string" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 256;
+    try packer.pack(String.init(val));
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xda" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 32-bit length string" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 65536;
+    try packer.pack(String.init(val));
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdb" ++ val,
+        actual,
+    );
 }

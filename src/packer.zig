@@ -4,7 +4,12 @@ const Marker = @import("marker.zig").Marker;
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
-pub const SerializeError = error{ TypeTooLarge, WrongType, TypeUnsupported };
+pub const SerializeError = error{
+    TypeTooLarge,
+    WrongType,
+    TypeUnsupported,
+    StringTooLarge,
+};
 
 /// Newtype to differentiate between a string (STR) and a byte array (BIN).
 pub const String = struct {
@@ -107,13 +112,24 @@ pub const Packer = struct {
                             self.buffer.len + bytes_needed + 1,
                         );
                     }
+                    const marker: u8 = if (bytes_needed < std.math.maxInt(u5))
+                        (0x50 | @as(u8, @intCast(bytes_needed)))
+                    else if (bytes_needed < std.math.maxInt(u8))
+                        Marker.STR_8
+                    else if (bytes_needed < std.math.maxInt(u16))
+                        Marker.STR_16
+                    else if (bytes_needed < std.math.maxInt(u32))
+                        Marker.STR_32
+                    else
+                        return SerializeError.StringTooLarge;
+
                     std.mem.writeInt(
                         u8,
                         std.mem.bytesAsValue(
                             [1]u8,
                             self.buffer[self.offset .. self.offset + 1],
                         ),
-                        0x50 | @as(u8, @intCast(bytes_needed)),
+                        marker,
                         Endian.big,
                     );
                     self.offset += 1;
