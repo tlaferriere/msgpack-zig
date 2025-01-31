@@ -1,6 +1,7 @@
 const std = @import("std");
 
-const Marker = @import("marker.zig").Marker;
+const marker = @import("marker.zig");
+const Marker = marker.Marker;
 
 const testing = std.testing;
 const Endian = std.builtin.Endian;
@@ -27,19 +28,19 @@ pub const Unpacker = struct {
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .Int => |int| self.unpack_int(int, As),
-            .Bool => switch (self.buffer[self.offset]) {
-                Marker.FALSE => {
+            .Bool => switch (try marker.decode(self.buffer[self.offset])) {
+                .False => {
                     self.offset += 1;
                     return false;
                 },
-                Marker.TRUE => {
+                .True => {
                     self.offset += 1;
                     return true;
                 },
                 else => DeserializeError.WrongType,
             },
-            .Optional => |optional| switch (self.buffer[self.offset]) {
-                Marker.NIL => {
+            .Optional => |optional| switch (try marker.decode(self.buffer[self.offset])) {
+                .Nil => {
                     self.offset += 1;
                     return null;
                 },
@@ -62,8 +63,8 @@ pub const Unpacker = struct {
         comptime float: Type.Float,
         comptime As: type,
     ) !As {
-        return switch (self.buffer[self.offset]) {
-            Marker.FLOAT_32 => if (float.bits >= 32) {
+        return switch (try marker.decode(self.buffer[self.offset])) {
+            .Float_32 => if (float.bits >= 32) {
                 const value = @as(
                     As,
                     @floatCast(
@@ -77,7 +78,7 @@ pub const Unpacker = struct {
                 self.offset += 5;
                 return value;
             } else DeserializeError.TypeTooSmall,
-            Marker.FLOAT_64 => if (float.bits >= 64) {
+            .Float_64 => if (float.bits >= 64) {
                 const value = @as(
                     As,
                     @floatCast(
@@ -101,8 +102,8 @@ pub const Unpacker = struct {
         comptime As: type,
     ) !As {
         return switch (int.signedness) {
-            .unsigned => switch (self.buffer[self.offset]) {
-                Marker.UINT_64 => if (int.bits >= 64) {
+            .unsigned => switch (try marker.decode(self.buffer[self.offset])) {
+                .Uint_64 => if (int.bits >= 64) {
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 9],
@@ -112,7 +113,7 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.UINT_32 => if (int.bits >= 32) {
+                .Uint_32 => if (int.bits >= 32) {
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 5],
@@ -122,7 +123,7 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.UINT_16 => if (int.bits >= 16) {
+                .Uint_16 => if (int.bits >= 16) {
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 3],
@@ -132,7 +133,7 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.UINT_8 => if (int.bits >= 8) {
+                .Uint_8 => if (int.bits >= 8) {
                     const value: As = @intCast(self.buffer[self.offset + 1]);
                     self.offset += 2;
                     return value;
@@ -147,8 +148,8 @@ pub const Unpacker = struct {
                     return value;
                 },
             },
-            .signed => switch (self.buffer[self.offset]) {
-                Marker.UINT_64, Marker.INT_64 => if (int.bits >= 64) {
+            .signed => switch (try marker.decode(self.buffer[self.offset])) {
+                .Uint_64, .Int_64 => if (int.bits >= 64) {
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 9],
@@ -158,7 +159,7 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.UINT_32, Marker.INT_32 => if (int.bits >= 32) {
+                .Uint_32, .Int_32 => if (int.bits >= 32) {
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 5],
@@ -168,7 +169,7 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.UINT_16, Marker.INT_16 => if (int.bits >= 16) {
+                .Uint_16, .Int_16 => if (int.bits >= 16) {
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 3],
@@ -178,13 +179,13 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.UINT_8 => if (int.bits > 8) {
+                .Uint_8 => if (int.bits > 8) {
                     const value: As = @intCast(self.buffer[self.offset + 1]);
                     self.offset += 2;
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                Marker.INT_8 => if (int.bits >= 8) {
+                .Int_8 => if (int.bits >= 8) {
                     const value: As = @intCast(
                         @as(i8, @bitCast(self.buffer[self.offset + 1])),
                     );
@@ -192,20 +193,20 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                else => {
-                    if (self.buffer[self.offset] & 0xE0 != 0xE0 and
-                        self.buffer[self.offset] & 0x80 != 0)
-                        return DeserializeError.WrongType;
-                    // Fixint
-                    return @intCast(@as(i8, @bitCast(self.buffer[self.offset]))); // Unsafe if compiler-optimized.
-                },
+                .FixPositive => |number| @intCast(number),
+                .FixNegative => |number| @intCast(@as(i6, @bitCast(0b10_0000 | @as(u6, number)))),
+                else => return DeserializeError.WrongType,
             },
         };
     }
 
-    // fn unpack_string(self: *Unpacker, comptime As: type) !As {
-    //     switch (self.buffer[self.offset]) {
-    //         else => if ()
-    //     }
-    // }
+    fn unpack_string(self: *Unpacker, comptime As: type) !As {
+        switch (try marker.decode(self.buffer[self.offset])) {
+            .Str_32 => {},
+            .Str_16 => {},
+            .Str_8 => {},
+            .FixStr => {},
+            else => return DeserializeError.WrongType,
+        }
+    }
 };
