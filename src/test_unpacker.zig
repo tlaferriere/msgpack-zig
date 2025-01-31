@@ -276,11 +276,13 @@ test "Deserialize fixstr" {
     const val = "Hello, World!";
     var message = try Unpacker.init(
         testing.allocator,
-        "\x5d" ++ val,
+        "\xAd" ++ val,
         0,
     );
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
     try testing.expectEqualStrings(
         val,
-        try message.unpack_as([]const u8),
+        unpacked,
     );
 }

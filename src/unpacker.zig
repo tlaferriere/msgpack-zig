@@ -201,12 +201,39 @@ pub const Unpacker = struct {
     }
 
     fn unpack_string(self: *Unpacker, comptime As: type) !As {
-        switch (try marker.decode(self.buffer[self.offset])) {
-            .Str_32 => {},
-            .Str_16 => {},
-            .Str_8 => {},
-            .FixStr => {},
+        const len: usize = switch (try marker.decode(self.buffer[self.offset])) {
+            .Str_32 => blk: {
+                const len = std.mem.readVarInt(
+                    usize,
+                    self.buffer[self.offset + 1 .. self.offset + 5],
+                    Endian.big,
+                );
+                self.offset += 5;
+                break :blk len;
+            },
+            .Str_16 => blk: {
+                const len = std.mem.readVarInt(
+                    usize,
+                    self.buffer[self.offset + 1 .. self.offset + 3],
+                    Endian.big,
+                );
+                self.offset += 3;
+                break :blk len;
+            },
+            .Str_8 => blk: {
+                const len: usize = @intCast(self.buffer[self.offset + 1]);
+                self.offset += 2;
+                break :blk len;
+            },
+            .FixStr => |len| blk: {
+                self.offset += 1;
+                break :blk len;
+            },
             else => return DeserializeError.WrongType,
-        }
+        };
+        const str = try self.allocator.alloc(u8, len);
+        @memcpy(str, self.buffer[self.offset .. self.offset + len]);
+        self.offset += 1 + len;
+        return @as(As, str);
     }
 };
