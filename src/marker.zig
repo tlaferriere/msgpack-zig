@@ -3,9 +3,10 @@ const Signedness = @import("std").builtin.Signedness;
 const meta = @import("std").meta;
 const math = @import("std").math;
 const testing = @import("std").testing;
+const debug = @import("std").debug;
 
 const MarkerMask = struct { marker: u8, mask: u8 = 0xFF };
-pub const MarkerValue = struct {
+pub const MarkerMasks = struct {
     pub const Nil = MarkerMask{ .marker = 0xc0 };
 
     pub const False = MarkerMask{ .marker = 0xc2 };
@@ -56,11 +57,11 @@ pub const MarkerValue = struct {
 
 pub const Marker = init: {
     // Generate the Marker Union from the
-    const markers = @typeInfo(MarkerValue).Struct.decls;
+    const markers = @typeInfo(MarkerMasks).Struct.decls;
     var union_fields: [markers.len]Type.UnionField = undefined;
     var enum_fields: [markers.len]Type.EnumField = undefined;
     for (&union_fields, &enum_fields, markers) |*union_field, *enum_field, marker| {
-        const mask = @field(MarkerValue, marker.name).mask;
+        const mask = @field(MarkerMasks, marker.name).mask;
         const field_type = @Type(Type{
             .Int = .{
                 // Take the bits left in the byte as the value.
@@ -70,7 +71,7 @@ pub const Marker = init: {
         });
         enum_field.* = Type.EnumField{
             .name = marker.name,
-            .value = @field(MarkerValue, marker.name).marker,
+            .value = @field(MarkerMasks, marker.name).marker,
         };
         union_field.* = Type.UnionField{
             .type = field_type,
@@ -96,8 +97,8 @@ pub const Marker = init: {
 pub const MarkerDecodeError = error{NotAMarker};
 
 pub fn decode(byte: u8) MarkerDecodeError!Marker {
-    inline for (@typeInfo(MarkerValue).Struct.decls) |field| {
-        const field_value = @field(MarkerValue, field.name);
+    inline for (@typeInfo(MarkerMasks).Struct.decls) |field| {
+        const field_value = @field(MarkerMasks, field.name);
         if (byte & field_value.mask == field_value.marker) {
             return @unionInit(
                 Marker,
@@ -109,9 +110,26 @@ pub fn decode(byte: u8) MarkerDecodeError!Marker {
     return MarkerDecodeError.NotAMarker;
 }
 
+pub const MarkerEncodeError = error{NotAMarker};
+
+pub fn encode(marker: Marker) u8 {
+    inline for (@typeInfo(Marker).Union.fields) |field| {
+        if (marker == @field(Marker, field.name)) {
+            const marker_mask: MarkerMask = @field(MarkerMasks, field.name);
+            return (marker_mask.marker & marker_mask.mask) |
+                (@field(marker, field.name) & ~marker_mask.mask);
+        }
+    }
+    unreachable;
+}
 test "FixPositive is a u7" {
     const un = Marker{ .FixPositive = 8 };
     try testing.expectEqual(u7, @TypeOf(un.FixPositive));
+}
+
+test "Encode a FixPositive" {
+    const un = Marker{ .FixPositive = 8 };
+    try testing.expectEqual(8, encode(un));
 }
 
 test "FixNegative is a u5" {
