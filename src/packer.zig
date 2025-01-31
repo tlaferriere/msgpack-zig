@@ -354,17 +354,16 @@ pub const Packer = struct {
                 self.buffer.len + bytes_needed + 1,
             );
         }
-        const mark = if (bytes_needed < std.math.maxInt(u5))
-            (0xA0 | @as(u8, @intCast(bytes_needed)))
+        const mark = marker.encode(if (bytes_needed < std.math.maxInt(u5))
+            Marker{ .FixStr = @intCast(bytes_needed) }
+        else if (bytes_needed < std.math.maxInt(u8))
+            Marker.Str_8
+        else if (bytes_needed < std.math.maxInt(u16))
+            Marker.Str_16
+        else if (bytes_needed < std.math.maxInt(u32))
+            Marker.Str_32
         else
-            marker.encode(if (bytes_needed < std.math.maxInt(u8))
-                Marker.Str_8
-            else if (bytes_needed < std.math.maxInt(u16))
-                Marker.Str_16
-            else if (bytes_needed < std.math.maxInt(u32))
-                Marker.Str_32
-            else
-                return SerializeError.StringTooLarge);
+            return SerializeError.StringTooLarge);
 
         std.mem.writeInt(
             u8,
@@ -376,6 +375,8 @@ pub const Packer = struct {
             Endian.big,
         );
         self.offset += 1;
+
+        // TODO: Add str len here for types other than FixStr.
 
         @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], object.str);
     }
