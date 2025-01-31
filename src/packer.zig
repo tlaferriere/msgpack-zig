@@ -1,5 +1,6 @@
 const std = @import("std");
-const Marker = @import("marker.zig").Marker;
+const marker = @import("marker.zig");
+const Marker = marker.Marker;
 
 const testing = std.testing;
 const Endian = std.builtin.Endian;
@@ -73,10 +74,10 @@ pub const Packer = struct {
                         self.buffer.len + 1,
                     );
                 }
-                self.buffer[self.offset] = @intFromEnum(if (object)
-                    Marker.TRUE
+                self.buffer[self.offset] = marker.encode(if (object)
+                    Marker.True
                 else
-                    Marker.FALSE);
+                    Marker.False);
                 self.offset += 1;
             },
             .Optional => {
@@ -90,7 +91,7 @@ pub const Packer = struct {
                             self.buffer.len + 1,
                         );
                     }
-                    self.buffer[self.offset] = @intFromEnum(Marker.NIL);
+                    self.buffer[self.offset] = marker.encode(Marker.Nil);
                     self.offset += 1;
                 } else {
                     try self.pack(object.?);
@@ -118,12 +119,12 @@ pub const Packer = struct {
                         self.buffer.len + bytes_needed + 1,
                     );
                 }
-                const marker: u8 = @intFromEnum(if (bytes_needed < std.math.maxInt(u8))
-                    Marker.BIN_8
+                const mark: u8 = marker.encode(if (bytes_needed < std.math.maxInt(u8))
+                    Marker.Bin_8
                 else if (bytes_needed < std.math.maxInt(u16))
-                    Marker.BIN_16
+                    Marker.Bin_16
                 else if (bytes_needed < std.math.maxInt(u32))
-                    Marker.BIN_32
+                    Marker.Bin_32
                 else
                     return SerializeError.StringTooLarge);
 
@@ -133,7 +134,7 @@ pub const Packer = struct {
                         [1]u8,
                         self.buffer[self.offset .. self.offset + 1],
                     ),
-                    marker,
+                    mark,
                     Endian.big,
                 );
                 self.offset += 1;
@@ -150,9 +151,9 @@ pub const Packer = struct {
     }
 
     fn pack_float(self: *Packer, comptime T: type, value: T) !void {
-        const marker = @intFromEnum(switch (@typeInfo(T).Float.bits) {
-            32 => Marker.FLOAT_32,
-            64 => Marker.FLOAT_64,
+        const mark = marker.encode(switch (@typeInfo(T).Float.bits) {
+            32 => .Float_32,
+            64 => .Float_64,
             else => return SerializeError.TypeUnsupported,
         });
 
@@ -172,7 +173,7 @@ pub const Packer = struct {
                 [1]u8,
                 self.buffer[self.offset .. self.offset + 1],
             ),
-            marker,
+            mark,
             Endian.big,
         );
         self.offset += 1;
@@ -228,10 +229,10 @@ pub const Packer = struct {
                         [1]u8,
                         self.buffer[self.offset .. self.offset + 1],
                     ),
-                    @intFromEnum(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
-                        Marker.INT_8
+                    marker.encode(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
+                        Marker.Int_8
                     else
-                        Marker.UINT_8),
+                        Marker.Uint_8),
                     Endian.big,
                 );
                 self.offset += 1;
@@ -259,10 +260,10 @@ pub const Packer = struct {
                         [1]u8,
                         self.buffer[self.offset .. self.offset + 1],
                     ),
-                    @intFromEnum(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
-                        Marker.INT_16
+                    marker.encode(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
+                        Marker.Int_16
                     else
-                        Marker.UINT_16),
+                        Marker.Uint_16),
                     Endian.big,
                 );
                 self.offset += 1;
@@ -289,10 +290,10 @@ pub const Packer = struct {
                         [1]u8,
                         self.buffer[self.offset .. self.offset + 1],
                     ),
-                    @intFromEnum(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
-                        Marker.INT_32
+                    marker.encode(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
+                        Marker.Int_32
                     else
-                        Marker.UINT_32),
+                        Marker.Uint_32),
                     Endian.big,
                 );
                 self.offset += 1;
@@ -319,10 +320,10 @@ pub const Packer = struct {
                         [1]u8,
                         self.buffer[self.offset .. self.offset + 1],
                     ),
-                    @intFromEnum(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
-                        Marker.INT_64
+                    marker.encode(if (type_info.Int.signedness == .signed and object <= std.math.maxInt(OutType))
+                        Marker.Int_64
                     else
-                        Marker.UINT_64),
+                        Marker.Uint_64),
                     Endian.big,
                 );
                 self.offset += 1;
@@ -353,15 +354,15 @@ pub const Packer = struct {
                 self.buffer.len + bytes_needed + 1,
             );
         }
-        const marker = if (bytes_needed < std.math.maxInt(u5))
-            (0x50 | @as(u8, @intCast(bytes_needed)))
+        const mark = if (bytes_needed < std.math.maxInt(u5))
+            (0xA0 | @as(u8, @intCast(bytes_needed)))
         else
-            @intFromEnum(if (bytes_needed < std.math.maxInt(u8))
-                Marker.STR_8
+            marker.encode(if (bytes_needed < std.math.maxInt(u8))
+                Marker.Str_8
             else if (bytes_needed < std.math.maxInt(u16))
-                Marker.STR_16
+                Marker.Str_16
             else if (bytes_needed < std.math.maxInt(u32))
-                Marker.STR_32
+                Marker.Str_32
             else
                 return SerializeError.StringTooLarge);
 
@@ -371,7 +372,7 @@ pub const Packer = struct {
                 [1]u8,
                 self.buffer[self.offset .. self.offset + 1],
             ),
-            marker,
+            mark,
             Endian.big,
         );
         self.offset += 1;

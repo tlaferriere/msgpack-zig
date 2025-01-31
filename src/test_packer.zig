@@ -412,7 +412,7 @@ test "Serialize fixstr" {
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
-        "\x5D" ++ val,
+        "\xAD" ++ val,
         actual,
     );
 }
