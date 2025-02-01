@@ -202,7 +202,7 @@ pub const Unpacker = struct {
 
     fn unpack_string(self: *Unpacker, comptime As: type) !As {
         const len: usize = switch (try marker.decode(self.buffer[self.offset])) {
-            .Str_32 => blk: {
+            .Bin_32, .Str_32 => blk: {
                 const len = std.mem.readVarInt(
                     usize,
                     self.buffer[self.offset + 1 .. self.offset + 5],
@@ -211,7 +211,7 @@ pub const Unpacker = struct {
                 self.offset += 5;
                 break :blk len;
             },
-            .Str_16 => blk: {
+            .Bin_16, .Str_16 => blk: {
                 const len = std.mem.readVarInt(
                     usize,
                     self.buffer[self.offset + 1 .. self.offset + 3],
@@ -220,7 +220,7 @@ pub const Unpacker = struct {
                 self.offset += 3;
                 break :blk len;
             },
-            .Str_8 => blk: {
+            .Bin_8, .Str_8 => blk: {
                 const len: usize = @intCast(self.buffer[self.offset + 1]);
                 self.offset += 2;
                 break :blk len;

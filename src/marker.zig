@@ -7,52 +7,129 @@ const debug = @import("std").debug;
 
 const MarkerMask = struct { marker: u8, mask: u8 = 0xFF };
 pub const MarkerMasks = struct {
-    pub const Nil = MarkerMask{ .marker = 0xc0 };
+    pub const Nil = MarkerMask{
+        .marker = 0xc0,
+    };
 
-    pub const False = MarkerMask{ .marker = 0xc2 };
-    pub const True = MarkerMask{ .marker = 0xc3 };
+    pub const False = MarkerMask{
+        .marker = 0xc2,
+    };
+    pub const True = MarkerMask{
+        .marker = 0xc3,
+    };
 
-    pub const FixPositive = MarkerMask{ .marker = 0, .mask = 0x80 };
-    pub const FixNegative = MarkerMask{ .marker = 0xE0, .mask = 0xE0 };
-    pub const Uint_8 = MarkerMask{ .marker = 0xcc };
-    pub const Uint_16 = MarkerMask{ .marker = 0xcd };
-    pub const Uint_32 = MarkerMask{ .marker = 0xce };
-    pub const Uint_64 = MarkerMask{ .marker = 0xcf };
+    pub const FixPositive = MarkerMask{
+        .marker = 0,
+        .mask = 0x80,
+    };
+    pub const FixNegative = MarkerMask{
+        .marker = 0xE0,
+        .mask = 0xE0,
+    };
+    pub const Uint_8 = MarkerMask{
+        .marker = 0xcc,
+    };
+    pub const Uint_16 = MarkerMask{
+        .marker = 0xcd,
+    };
+    pub const Uint_32 = MarkerMask{
+        .marker = 0xce,
+    };
+    pub const Uint_64 = MarkerMask{
+        .marker = 0xcf,
+    };
 
-    pub const Int_8 = MarkerMask{ .marker = 0xd0 };
-    pub const Int_16 = MarkerMask{ .marker = 0xd1 };
-    pub const Int_32 = MarkerMask{ .marker = 0xd2 };
-    pub const Int_64 = MarkerMask{ .marker = 0xd3 };
+    pub const Int_8 = MarkerMask{
+        .marker = 0xd0,
+    };
+    pub const Int_16 = MarkerMask{
+        .marker = 0xd1,
+    };
+    pub const Int_32 = MarkerMask{
+        .marker = 0xd2,
+    };
+    pub const Int_64 = MarkerMask{
+        .marker = 0xd3,
+    };
 
-    pub const Float_32 = MarkerMask{ .marker = 0xca };
-    pub const Float_64 = MarkerMask{ .marker = 0xcb };
+    pub const Float_32 = MarkerMask{
+        .marker = 0xca,
+    };
+    pub const Float_64 = MarkerMask{
+        .marker = 0xcb,
+    };
 
-    pub const FixStr = MarkerMask{ .marker = 0xA0, .mask = 0xE0 };
-    pub const Str_8 = MarkerMask{ .marker = 0xd9 };
-    pub const Str_16 = MarkerMask{ .marker = 0xda };
-    pub const Str_32 = MarkerMask{ .marker = 0xdb };
+    pub const FixStr = MarkerMask{
+        .marker = 0xA0,
+        .mask = 0xE0,
+    };
+    pub const Str_8 = MarkerMask{
+        .marker = 0xd9,
+    };
+    pub const Str_16 = MarkerMask{
+        .marker = 0xda,
+    };
+    pub const Str_32 = MarkerMask{
+        .marker = 0xdb,
+    };
 
-    pub const Bin_8 = MarkerMask{ .marker = 0xc4 };
-    pub const Bin_16 = MarkerMask{ .marker = 0xc5 };
-    pub const Bin_32 = MarkerMask{ .marker = 0xc6 };
+    pub const Bin_8 = MarkerMask{
+        .marker = 0xc4,
+    };
+    pub const Bin_16 = MarkerMask{
+        .marker = 0xc5,
+    };
+    pub const Bin_32 = MarkerMask{
+        .marker = 0xc6,
+    };
 
-    pub const FixArray = MarkerMask{ .marker = 0x90, .mask = 0xF8 };
-    pub const Array_16 = MarkerMask{ .marker = 0xdc };
-    pub const Array_32 = MarkerMask{ .marker = 0xdd };
+    pub const FixArray = MarkerMask{
+        .marker = 0x90,
+        .mask = 0xF8,
+    };
+    pub const Array_16 = MarkerMask{
+        .marker = 0xdc,
+    };
+    pub const Array_32 = MarkerMask{
+        .marker = 0xdd,
+    };
 
-    pub const FixMap = MarkerMask{ .marker = 0x80, .mask = 0xF8 };
-    pub const Map_16 = MarkerMask{ .marker = 0xde };
-    pub const Map_32 = MarkerMask{ .marker = 0xdf };
+    pub const FixMap = MarkerMask{
+        .marker = 0x80,
+        .mask = 0xF8,
+    };
+    pub const Map_16 = MarkerMask{
+        .marker = 0xde,
+    };
+    pub const Map_32 = MarkerMask{
+        .marker = 0xdf,
+    };
 
-    pub const FixExt_1 = MarkerMask{ .marker = 0xd4 };
-    pub const FixExt_2 = MarkerMask{ .marker = 0xd5 };
-    pub const FixExt_4 = MarkerMask{ .marker = 0xd6 };
-    pub const FixExt_8 = MarkerMask{ .marker = 0xd7 };
-    pub const FixExt_16 = MarkerMask{ .marker = 0xd8 };
+    pub const FixExt_1 = MarkerMask{
+        .marker = 0xd4,
+    };
+    pub const FixExt_2 = MarkerMask{
+        .marker = 0xd5,
+    };
+    pub const FixExt_4 = MarkerMask{
+        .marker = 0xd6,
+    };
+    pub const FixExt_8 = MarkerMask{
+        .marker = 0xd7,
+    };
+    pub const FixExt_16 = MarkerMask{
+        .marker = 0xd8,
+    };
 
-    pub const Ext_8 = MarkerMask{ .marker = 0xc7 };
-    pub const Ext_16 = MarkerMask{ .marker = 0xc8 };
-    pub const Ext_32 = MarkerMask{ .marker = 0xc9 };
+    pub const Ext_8 = MarkerMask{
+        .marker = 0xc7,
+    };
+    pub const Ext_16 = MarkerMask{
+        .marker = 0xc8,
+    };
+    pub const Ext_32 = MarkerMask{
+        .marker = 0xc9,
+    };
 };
 
 pub const Marker = init: {

@@ -88,3 +88,45 @@ test "float round-trip" {
     );
     try testing.expectEqual(val, try message.unpack_as(f32));
 }
+
+test "Deserialize 32-bit length bin round_trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 0x0001_0000;
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize 32-bit length string round_trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const val = "t" ** 0x0001_0000;
+    try packer.pack(msgpack.String(val));
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(
+        val,
+        unpacked,
+    );
+}

@@ -5,3 +5,4 @@ const packer = @import("packer.zig");
 // Reexports
 pub const Unpacker = unpacker.Unpacker;
 pub const Packer = packer.Packer;
+pub const String = packer.String;

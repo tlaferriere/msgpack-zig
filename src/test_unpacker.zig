@@ -334,3 +334,51 @@ test "Deserialize 32-bit length str" {
         unpacked,
     );
 }
+
+test "Deserialize 8-bit length bin" {
+    const len = 0b0010_0000;
+    const val = "t" ** len;
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc4" ++ .{len} ++ val,
+        0,
+    );
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize 16-bit length bin" {
+    const len = 0x01_00;
+    const val = "t" ** len;
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc5\x01\x00" ++ val,
+        0,
+    );
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize 32-bit length bin" {
+    const len = 0x00_01_00_00;
+    const val = "t" ** len;
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc6\x00\x01\x00\x00" ++ val,
+        0,
+    );
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(
+        val,
+        unpacked,
+    );
+}
