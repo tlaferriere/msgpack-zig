@@ -99,7 +99,7 @@ pub const Packer = struct {
     fn write(self: *Packer, object: anytype) !void {
         const T = @TypeOf(object);
         return switch (@typeInfo(T)) {
-            .Int => self.pack_int(@TypeOf(object), object),
+            .Int => self.write_int(@TypeOf(object), object),
             .Bool => {
                 self.buffer[self.offset] = marker.encode(if (object)
                     Marker.True
@@ -112,45 +112,22 @@ pub const Packer = struct {
                     self.buffer[self.offset] = marker.encode(Marker.Nil);
                     self.offset += 1;
                 } else {
-                    try self.pack(object.?);
+                    try self.write(object.?);
                 }
             },
             .Float => {
-                try self.pack_float(@TypeOf(object), object);
+                try self.write_float(@TypeOf(object), object);
             },
             .Struct => {
                 if (T == StringType) {
-                    try self.pack_string(object.str);
+                    try self.write_string(object.str);
                 } else {
                     @compileError("Structs not supported yet.");
                 }
             },
             .Array => {},
             .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8) {
-                const bytes_needed = object.len;
-                const mark = marker.encode(
-                    if (bytes_needed <= std.math.maxInt(u8))
-                        Marker.Bin_8
-                    else if (bytes_needed <= std.math.maxInt(u16))
-                        Marker.Bin_16
-                    else if (bytes_needed <= std.math.maxInt(u32))
-                        Marker.Bin_32
-                    else
-                        unreachable,
-                );
-
-                std.mem.writeInt(
-                    u8,
-                    std.mem.bytesAsValue(
-                        [1]u8,
-                        self.buffer[self.offset .. self.offset + 1],
-                    ),
-                    mark,
-                    Endian.big,
-                );
-                self.offset += 1;
-
-                @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], object);
+                try self.write_bin(object);
             } else {
                 self.pack(object.*);
             },
@@ -161,7 +138,7 @@ pub const Packer = struct {
         };
     }
 
-    fn pack_float(self: *Packer, comptime T: type, value: T) !void {
+    fn write_float(self: *Packer, comptime T: type, value: T) !void {
         const mark = marker.encode(switch (@typeInfo(T).Float.bits) {
             32 => .Float_32,
             64 => .Float_64,
@@ -199,7 +176,7 @@ pub const Packer = struct {
         );
     }
 
-    fn pack_int(self: *Packer, comptime T: type, value: T) !void {
+    fn write_int(self: *Packer, comptime T: type, value: T) !void {
         if (std.math.minInt(i6) <= value and value <= std.math.maxInt(u7)) {
             const mark = marker.encode(if (std.math.sign(value) == -1)
                 Marker{ .FixNegative = @bitCast(@as(i5, @truncate(value))) }
@@ -274,20 +251,20 @@ pub const Packer = struct {
         }
     }
 
-    fn pack_string(self: *Packer, string: []const u8) !void {
-        const bytes_needed = string.len;
-        const mark = marker.encode(
-            if (bytes_needed < std.math.maxInt(u5))
-                Marker{ .FixStr = @intCast(bytes_needed) }
-            else if (bytes_needed <= std.math.maxInt(u8))
-                Marker.Str_8
-            else if (bytes_needed <= std.math.maxInt(u16))
-                Marker.Str_16
-            else if (bytes_needed <= std.math.maxInt(u32))
-                Marker.Str_32
-            else
-                return SerializeError.StringTooLarge,
-        );
+    fn write_string(self: *Packer, string: []const u8) !void {
+        const len = string.len;
+        const mark =
+            if (len < std.math.maxInt(u5))
+            Marker{ .FixStr = @intCast(len) }
+        else if (len <= std.math.maxInt(u8))
+            Marker{ .Str_8 = 0 }
+        else if (len <= std.math.maxInt(u16))
+            Marker{ .Str_16 = 0 }
+        else if (len <= std.math.maxInt(u32))
+            Marker{ .Str_32 = 0 }
+        else {
+            return SerializeError.StringTooLarge;
+        };
 
         std.mem.writeInt(
             u8,
@@ -295,14 +272,81 @@ pub const Packer = struct {
                 [1]u8,
                 self.buffer[self.offset .. self.offset + 1],
             ),
-            mark,
+            marker.encode(mark),
             Endian.big,
         );
         self.offset += 1;
 
-        // TODO: Add str len here for types other than FixStr.
+        inline for (.{
+            Marker.Str_8,
+            Marker.Str_16,
+            Marker.Str_32,
+        }, .{ u8, u16, u32 }) |m, OutType| {
+            if (m == mark) {
+                const byte_count = @typeInfo(OutType).Int.bits / 8;
+                std.mem.writeInt(
+                    OutType,
+                    std.mem.bytesAsValue(
+                        [byte_count]u8,
+                        self.buffer[self.offset .. self.offset + byte_count],
+                    ),
+                    @intCast(len),
+                    Endian.big,
+                );
+                self.offset += byte_count;
+                break;
+            }
+        }
 
-        @memcpy(self.buffer[self.offset .. self.offset + bytes_needed], string);
+        @memcpy(self.buffer[self.offset .. self.offset + len], string);
+    }
+
+    fn write_bin(self: *Packer, string: []const u8) !void {
+        const len = string.len;
+        const mark =
+            if (len <= std.math.maxInt(u8))
+            Marker{ .Bin_8 = 0 }
+        else if (len <= std.math.maxInt(u16))
+            Marker{ .Bin_16 = 0 }
+        else if (len <= std.math.maxInt(u32))
+            Marker{ .Bin_32 = 0 }
+        else {
+            return SerializeError.StringTooLarge;
+        };
+
+        std.mem.writeInt(
+            u8,
+            std.mem.bytesAsValue(
+                [1]u8,
+                self.buffer[self.offset .. self.offset + 1],
+            ),
+            marker.encode(mark),
+            Endian.big,
+        );
+        self.offset += 1;
+
+        inline for (.{
+            Marker.Bin_8,
+            Marker.Bin_16,
+            Marker.Bin_32,
+        }, .{ u8, u16, u32 }) |m, OutType| {
+            if (m == mark) {
+                const byte_count = @typeInfo(OutType).Int.bits / 8;
+                std.mem.writeInt(
+                    OutType,
+                    std.mem.bytesAsValue(
+                        [byte_count]u8,
+                        self.buffer[self.offset .. self.offset + byte_count],
+                    ),
+                    @intCast(len),
+                    Endian.big,
+                );
+                self.offset += byte_count;
+                break;
+            }
+        }
+
+        @memcpy(self.buffer[self.offset .. self.offset + len], string);
     }
 };
 
