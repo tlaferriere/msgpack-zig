@@ -47,8 +47,12 @@ pub const Unpacker = struct {
                 else => try self.unpack_as(optional.child),
             },
             .Float => |float| self.unpack_float(float, As),
-            .Pointer => |pointer| if (pointer.size == .Slice and pointer.child == u8) {
-                return self.unpack_string(As);
+            .Pointer => |pointer| switch (pointer.size) {
+                .Slice => if (pointer.child == u8) {
+                    return self.unpack_string(As);
+                } else {
+                    return self.unpack_array(, comptime As: type)
+                },
             },
             .Array => |array| self.unpack_array(array, As),
             else => {
