@@ -6,7 +6,7 @@ const Marker = marker.Marker;
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
-pub const DeserializeError = error{ TypeTooSmall, WrongType, Finished };
+pub const DeserializeError = error{ TypeTooSmall, WrongType, Finished, WrongArrayLength };
 
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
@@ -50,6 +50,7 @@ pub const Unpacker = struct {
             .Pointer => |pointer| if (pointer.size == .Slice and pointer.child == u8) {
                 return self.unpack_string(As);
             },
+            .Array => |array| self.unpack_array(array, As),
             else => {
                 @compileLog(As);
                 @compileLog(@typeInfo(As));
@@ -193,8 +194,16 @@ pub const Unpacker = struct {
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
-                .FixPositive => |number| @intCast(number),
-                .FixNegative => |number| @intCast(@as(i6, @bitCast(0b10_0000 | @as(u6, number)))),
+                .FixPositive => |number| {
+                    const value: As = @intCast(number);
+                    self.offset += 1;
+                    return value;
+                },
+                .FixNegative => |number| {
+                    const value: As = @intCast(@as(i6, @bitCast(0b10_0000 | @as(u6, number))));
+                    self.offset += 1;
+                    return value;
+                },
                 else => return DeserializeError.WrongType,
             },
         };
@@ -235,5 +244,38 @@ pub const Unpacker = struct {
         @memcpy(str, self.buffer[self.offset .. self.offset + len]);
         self.offset += 1 + len;
         return @as(As, str);
+    }
+
+    fn unpack_array(self: *Unpacker, comptime array: Type.Array, comptime As: type) !As {
+        switch (try marker.decode(self.buffer[self.offset])) {
+            .FixArray => |len| {
+                if (array.len != len) return DeserializeError.WrongArrayLength;
+                self.offset += 1;
+            },
+            .Array_16 => {
+                const len = std.mem.readVarInt(
+                    u16,
+                    self.buffer[self.offset + 1 .. self.offset + 3],
+                    Endian.big,
+                );
+                if (array.len != len) return DeserializeError.WrongArrayLength;
+                self.offset += 3;
+            },
+            .Array_32 => {
+                const len = std.mem.readVarInt(
+                    u32,
+                    self.buffer[self.offset + 1 .. self.offset + 5],
+                    Endian.big,
+                );
+                if (array.len != len) return DeserializeError.WrongArrayLength;
+                self.offset += 5;
+            },
+            else => return DeserializeError.WrongType,
+        }
+        var arr: As = undefined;
+        for (&arr) |*element| {
+            element.* = try self.unpack_as(array.child);
+        }
+        return arr;
     }
 };

@@ -382,3 +382,47 @@ test "Deserialize 32-bit length bin" {
         unpacked,
     );
 }
+
+test "Deserialize FixArray of i32" {
+    const val: [4]i32 = .{ 0x0EADBEEF, 32, 0, -1 };
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\x94\xd2\x0E\xAD\xBE\xEF\x20\x00\xFF",
+        0,
+    );
+    const unpacked = try message.unpack_as([4]i32);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize 16-bit array" {
+    const len = 0b0001_0000;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xdc\x00\x10" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        0,
+    );
+    const unpacked = try message.unpack_as([len]u32);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize 32-bit length array" {
+    const len = 0x00_01_00_00;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xdd\x00\x01\x00\x00" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        0,
+    );
+    const unpacked = try message.unpack_as([len]u32);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
