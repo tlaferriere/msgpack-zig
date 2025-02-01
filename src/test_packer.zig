@@ -500,3 +500,47 @@ test "Serialize 32-bit length binary string" {
         actual,
     );
 }
+
+test "Serialize FixArray" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val: [4]i32 = .{ 0x0EADBEEF, 32, 0, -1 };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\x94\xd2\x0E\xAD\xBE\xEF\x20\x00\xFF",
+        actual,
+    );
+}
+
+test "Serialize 16-bit length array" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const len = 0b0001_0000;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdc\x00\x10" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        actual,
+    );
+}
+
+test "Serialize 32-bit length array" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const len = 0x00_01_00_00;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdd\x00\x01\x00\x00" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        actual,
+    );
+}

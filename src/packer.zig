@@ -10,6 +10,7 @@ pub const SerializeError = error{
     WrongType,
     TypeUnsupported,
     StringTooLarge,
+    ArrayTooLarge,
 };
 
 const StringType = struct {
@@ -125,7 +126,9 @@ pub const Packer = struct {
                     @compileError("Structs not supported yet.");
                 }
             },
-            .Array => {},
+            .Array => |array| {
+                try self.write_array(array, object);
+            },
             .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8) {
                 try self.write_bin(object);
             } else {
@@ -348,6 +351,63 @@ pub const Packer = struct {
 
         @memcpy(self.buffer[self.offset .. self.offset + len], string);
     }
+
+    fn write_array(self: *Packer, comptime info: Type.Array, array: anytype) !void {
+        const len = info.len;
+        const mark =
+            if (len <= std.math.maxInt(u4))
+            Marker{ .FixArray = len }
+        else if (len <= std.math.maxInt(u16))
+            Marker{ .Array_16 = 0 }
+        else if (len <= std.math.maxInt(u32))
+            Marker{ .Array_32 = 0 }
+        else {
+            return SerializeError.ArrayTooLarge;
+        };
+
+        std.mem.writeInt(
+            u8,
+            std.mem.bytesAsValue(
+                [1]u8,
+                self.buffer[self.offset .. self.offset + 1],
+            ),
+            marker.encode(mark),
+            Endian.big,
+        );
+        self.offset += 1;
+
+        switch (mark) {
+            .FixArray => {},
+            .Array_16 => {
+                std.mem.writeInt(
+                    u16,
+                    std.mem.bytesAsValue(
+                        [2]u8,
+                        self.buffer[self.offset .. self.offset + 2],
+                    ),
+                    len,
+                    Endian.big,
+                );
+                self.offset += 2;
+            },
+            .Array_32 => {
+                std.mem.writeInt(
+                    u32,
+                    std.mem.bytesAsValue(
+                        [4]u8,
+                        self.buffer[self.offset .. self.offset + 4],
+                    ),
+                    len,
+                    Endian.big,
+                );
+                self.offset += 4;
+            },
+            else => unreachable,
+        }
+        for (array) |element| {
+            try self.write(element);
+        }
+    }
 };
 
 fn packed_size(object: anytype) !usize {
@@ -367,7 +427,7 @@ fn packed_size(object: anytype) !usize {
         .Array => |array| if (array.child == u8)
             bin_packed_size(object)
         else
-            @compileError("Arrays not supported yet."),
+            array_packed_size(array, object),
         .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8)
             bin_packed_size(object)
         else
@@ -429,4 +489,19 @@ fn bin_packed_size(bin: []const u8) !usize {
         5 + bytes_needed
     else
         SerializeError.StringTooLarge;
+}
+
+fn array_packed_size(comptime info: Type.Array, array: anytype) !usize {
+    var packed_len: usize = if (info.len <= std.math.maxInt(u4))
+        1
+    else if (info.len <= std.math.maxInt(u16))
+        3
+    else if (info.len <= std.math.maxInt(u32))
+        5
+    else
+        return SerializeError.ArrayTooLarge;
+    for (array) |element| {
+        packed_len += try packed_size(element);
+    }
+    return packed_len;
 }
