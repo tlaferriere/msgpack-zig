@@ -130,3 +130,24 @@ test "Deserialize 32-bit length string round_trip" {
         unpacked,
     );
 }
+
+test "Deserialize 32-bit length array round_trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const len = 0x00_01_00_00;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as([len]u32);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
