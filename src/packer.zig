@@ -126,13 +126,16 @@ pub const Packer = struct {
                     @compileError("Structs not supported yet.");
                 }
             },
-            .Array => |array| {
-                try self.write_array(array, object);
-            },
-            .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8) {
-                try self.write_bin(object);
-            } else {
-                self.pack(object.*);
+            .Array => |array| self.write_array(array.len, object),
+            .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8)
+                try self.write_bin(object)
+            else switch (pointer.size) {
+                .One => self.write(object.*),
+                .Slice, .Many => self.write_array(null, object),
+                .C => {
+                    @compileLog(pointer);
+                    @compileError("C sized pointer is not supported.");
+                },
             },
             else => {
                 @compileLog(T);
@@ -352,8 +355,12 @@ pub const Packer = struct {
         @memcpy(self.buffer[self.offset .. self.offset + len], string);
     }
 
-    fn write_array(self: *Packer, comptime info: Type.Array, array: anytype) !void {
-        const len = info.len;
+    fn write_array(self: *Packer, comptime static_len: ?usize, array: anytype) !void {
+        const len = if (static_len == null)
+            array.len
+        else
+            static_len.?;
+
         const mark =
             if (len <= std.math.maxInt(u4))
             Marker{ .FixArray = len }
