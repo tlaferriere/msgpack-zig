@@ -435,6 +435,7 @@ test "Deserialize slice as FixArray of i32" {
         0,
     );
     const unpacked = try message.unpack_as([]i32);
+    defer testing.allocator.free(unpacked);
     try testing.expectEqualDeep(
         val,
         unpacked,
@@ -450,6 +451,7 @@ test "Deserialize slice as 16-bit array" {
         0,
     );
     const unpacked = try message.unpack_as([]u32);
+    defer testing.allocator.free(unpacked);
     try testing.expectEqualDeep(
         val,
         unpacked,
@@ -465,6 +467,7 @@ test "Deserialize slice as 32-bit length array" {
         0,
     );
     const unpacked = try message.unpack_as([]u32);
+    defer testing.allocator.free(unpacked);
     try testing.expectEqualDeep(
         val,
         unpacked,

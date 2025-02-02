@@ -48,13 +48,20 @@ pub const Unpacker = struct {
             },
             .Float => |float| self.unpack_float(float, As),
             .Pointer => |pointer| switch (pointer.size) {
+                .One => if (pointer.child == .Array) {
+                    return self.unpack_array(pointer.child.Array.len, As);
+                } else {
+                    @compileError("Can't serialize objects behind pointers yet.");
+                },
                 .Slice => if (pointer.child == u8) {
                     return self.unpack_string(As);
                 } else {
-                    return self.unpack_array(, comptime As: type)
+                    return self.unpack_array(null, As);
                 },
+                .Many => self.unpack_array(null, As),
+                .C => @compileError("C sized pointer."),
             },
-            .Array => |array| self.unpack_array(array, As),
+            .Array => |array| self.unpack_array(array.len, As),
             else => {
                 @compileLog(As);
                 @compileLog(@typeInfo(As));
@@ -250,10 +257,19 @@ pub const Unpacker = struct {
         return @as(As, str);
     }
 
-    fn unpack_array(self: *Unpacker, comptime array: Type.Array, comptime As: type) !As {
+    fn unpack_array(self: *Unpacker, comptime target_len: ?usize, comptime As: type) !As {
+        const info = @typeInfo(As);
+        var array: As = undefined;
         switch (try marker.decode(self.buffer[self.offset])) {
             .FixArray => |len| {
-                if (array.len != len) return DeserializeError.WrongArrayLength;
+                if (target_len != null) {
+                    if (target_len.? != len) return DeserializeError.WrongArrayLength;
+                } else {
+                    // if (info == .Pointer) {
+                    // @compileLog("FixArray to unknown size size array: ", info);
+                    array = try self.allocator.alloc(info.Pointer.child, len);
+                    // }
+                }
                 self.offset += 1;
             },
             .Array_16 => {
@@ -262,7 +278,14 @@ pub const Unpacker = struct {
                     self.buffer[self.offset + 1 .. self.offset + 3],
                     Endian.big,
                 );
-                if (array.len != len) return DeserializeError.WrongArrayLength;
+                if (target_len != null) {
+                    if (target_len.? != len) return DeserializeError.WrongArrayLength;
+                } else {
+                    // if (info == .Pointer) {
+                    // @compileLog("FixArray to unknown size size array: ", info);
+                    array = try self.allocator.alloc(info.Pointer.child, len);
+                    // }
+                }
                 self.offset += 3;
             },
             .Array_32 => {
@@ -271,15 +294,21 @@ pub const Unpacker = struct {
                     self.buffer[self.offset + 1 .. self.offset + 5],
                     Endian.big,
                 );
-                if (array.len != len) return DeserializeError.WrongArrayLength;
+                if (target_len != null) {
+                    if (target_len.? != len) return DeserializeError.WrongArrayLength;
+                } else {
+                    // if (info == .Pointer) {
+                    // @compileLog("FixArray to unknown size size array: ", info);
+                    array = try self.allocator.alloc(info.Pointer.child, len);
+                    // }
+                }
                 self.offset += 5;
             },
             else => return DeserializeError.WrongType,
         }
-        var arr: As = undefined;
-        for (&arr) |*element| {
-            element.* = try self.unpack_as(array.child);
+        for (if (info == .Array) &array else array) |*element| {
+            element.* = try self.unpack_as(@TypeOf(element.*));
         }
-        return arr;
+        return array;
     }
 };
