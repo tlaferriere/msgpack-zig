@@ -559,32 +559,32 @@ test "Serialize slice to FixArray" {
     );
 }
 
-// test "Serialize slice to 16-bit length array" {
-//     var packer = try Packer.init(
-//         testing.allocator,
-//     );
-//     const len = 0b0001_0000;
-//     const val: [len]u32 = .{0xDEADBEEF} ** len;
-//     try packer.pack(val[0..len]);
-//     const actual = packer.finish();
-//     defer testing.allocator.free(actual);
-//     try testing.expectEqualStrings(
-//         "\xdc\x00\x10" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
-//         actual,
-//     );
-// }
+test "Serialize slice to 16-bit length array" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const len = 0b0001_0000;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val[0..len]);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdc\x00\x10" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        actual,
+    );
+}
 
-// test "Serialize slice to 32-bit length array" {
-//     var packer = try Packer.init(
-//         testing.allocator,
-//     );
-//     const len = 0x00_01_00_00;
-//     const val: [len]u32 = .{0xDEADBEEF} ** len;
-//     try packer.pack(val[0..len]);
-//     const actual = packer.finish();
-//     defer testing.allocator.free(actual);
-//     try testing.expectEqualStrings(
-//         "\xdd\x00\x01\x00\x00" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
-//         actual,
-//     );
-// }
+test "Serialize slice to 32-bit length array" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const len = 0x00_01_00_00;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val[0..len]);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdd\x00\x01\x00\x00" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        actual,
+    );
+}
