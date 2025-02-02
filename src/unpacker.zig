@@ -53,12 +53,11 @@ pub const Unpacker = struct {
                 } else {
                     @compileError("Can't serialize objects behind pointers yet.");
                 },
-                .Slice => if (pointer.child == u8) {
+                .Slice, .Many => if (pointer.child == u8) {
                     return self.unpack_string(As);
                 } else {
                     return self.unpack_array(null, As);
                 },
-                .Many => self.unpack_array(null, As),
                 .C => @compileError("C sized pointer."),
             },
             .Array => |array| self.unpack_array(array.len, As),
