@@ -85,7 +85,7 @@ pub const MarkerMasks = struct {
 
     pub const FixArray = MarkerMask{
         .marker = 0x90,
-        .mask = 0xF8,
+        .mask = 0xF0,
     };
     pub const Array_16 = MarkerMask{
         .marker = 0xdc,
@@ -96,7 +96,7 @@ pub const MarkerMasks = struct {
 
     pub const FixMap = MarkerMask{
         .marker = 0x80,
-        .mask = 0xF8,
+        .mask = 0xF0,
     };
     pub const Map_16 = MarkerMask{
         .marker = 0xde,
