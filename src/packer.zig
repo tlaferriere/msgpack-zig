@@ -11,6 +11,7 @@ pub const SerializeError = error{
     TypeUnsupported,
     StringTooLarge,
     ArrayTooLarge,
+    MapTooLarge,
 };
 
 const StringType = struct {
@@ -121,10 +122,18 @@ pub const Packer = struct {
             },
             .Struct => {
                 if (T == StringType) {
-                    try self.write_string(object.str);
-                } else {
-                    @compileError("Structs not supported yet.");
+                    return self.write_string(object.str);
                 }
+                if (@hasDecl(T, "iterator") and
+                    @hasDecl(T, "Iterator") and
+                    @hasDecl(T, "Entry") and
+                    @hasField(T.Entry, "key_ptr") and
+                    @hasField(T.Entry, "value_ptr") and
+                    @hasDecl(T, "count"))
+                {
+                    return self.write_map(object);
+                }
+                @compileError("Struct not supported yet.");
             },
             .Array => |array| self.write_array(array.len, object),
             .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8)
@@ -415,6 +424,65 @@ pub const Packer = struct {
             try self.write(element);
         }
     }
+
+    fn write_map(self: *Packer, map: anytype) !void {
+        const count = map.count();
+        const mark =
+            if (count <= std.math.maxInt(u4))
+            Marker{ .FixMap = @intCast(count) }
+        else if (count <= std.math.maxInt(u16))
+            Marker{ .Map_16 = 0 }
+        else if (count <= std.math.maxInt(u32))
+            Marker{ .Map_32 = 0 }
+        else {
+            return SerializeError.MapTooLarge;
+        };
+
+        std.mem.writeInt(
+            u8,
+            std.mem.bytesAsValue(
+                [1]u8,
+                self.buffer[self.offset .. self.offset + 1],
+            ),
+            marker.encode(mark),
+            Endian.big,
+        );
+        self.offset += 1;
+
+        switch (mark) {
+            .FixMap => {},
+            .Map_16 => {
+                std.mem.writeInt(
+                    u16,
+                    std.mem.bytesAsValue(
+                        [2]u8,
+                        self.buffer[self.offset .. self.offset + 2],
+                    ),
+                    @intCast(count),
+                    Endian.big,
+                );
+                self.offset += 2;
+            },
+            .Map_32 => {
+                std.mem.writeInt(
+                    u32,
+                    std.mem.bytesAsValue(
+                        [4]u8,
+                        self.buffer[self.offset .. self.offset + 4],
+                    ),
+                    @intCast(count),
+                    Endian.big,
+                );
+                self.offset += 4;
+            },
+            else => unreachable,
+        }
+        var iter = map.iterator();
+        while (iter.next()) |entry| {
+            try self.write(entry.key_ptr.*);
+            try self.write(entry.value_ptr.*);
+        }
+    }
 };
 
 fn packed_size(object: anytype) !usize {
@@ -429,16 +497,32 @@ fn packed_size(object: anytype) !usize {
         .Float => float_packed_size(@TypeOf(object)),
         .Struct => if (T == StringType)
             string_packed_size(object.str)
-        else
-            @compileError("Structs not supported yet."),
+        else if (@hasDecl(T, "iterator") and
+            @hasDecl(T, "Iterator") and
+            @hasDecl(T, "Entry") and
+            @hasField(T.Entry, "key_ptr") and
+            @hasField(T.Entry, "value_ptr") and
+            @hasDecl(T, "count"))
+            map_packed_size(object)
+        else {
+            @compileLog(@typeName(T));
+            @compileLog(T);
+            @compileLog(@typeInfo(T));
+            @compileLog(@typeInfo(T).Struct.fields);
+            @compileLog(@typeInfo(T).Struct.decls);
+            @compileError("Structs not supported yet.");
+        },
         .Array => |array| if (array.child == u8)
             bin_packed_size(object)
         else
             array_packed_size(array, object),
-        .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8)
-            bin_packed_size(object)
-        else
-            packed_size(object.*),
+        .Pointer => |pointer| switch (pointer.size) {
+            .One => if (@typeInfo(pointer.child) == .Array and
+                @typeInfo(pointer.child).Array.child == u8)
+                bin_packed_size(object)
+            else
+                packed_size(object.*),
+        },
         else => {
             @compileLog(T);
             @compileError("Type not serializable into msgpack.");
@@ -509,6 +593,24 @@ fn array_packed_size(comptime info: Type.Array, array: anytype) !usize {
         return SerializeError.ArrayTooLarge;
     for (array) |element| {
         packed_len += try packed_size(element);
+    }
+    return packed_len;
+}
+
+fn map_packed_size(map: anytype) !usize {
+    const count = map.count();
+    var packed_len: usize = if (count <= std.math.maxInt(u4))
+        1
+    else if (count <= std.math.maxInt(u16))
+        3
+    else if (count <= std.math.maxInt(u32))
+        5
+    else
+        return SerializeError.ArrayTooLarge;
+    var iter = map.iterator();
+    while (iter.next()) |entry| {
+        packed_len += try packed_size(entry.key_ptr.*);
+        packed_len += try packed_size(entry.value_ptr.*);
     }
     return packed_len;
 }
