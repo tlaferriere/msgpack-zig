@@ -1,6 +1,7 @@
 const Packer = @import("packer.zig").Packer;
 const SerializeError = @import("packer.zig").SerializeError;
-const String = @import("packer.zig").String;
+const Bin = @import("packer.zig").Bin;
+const MyBin = @import("root.zig").MyBin;
 
 const std = @import("std");
 const testing = std.testing;
@@ -408,7 +409,7 @@ test "Serialize fixstr" {
         testing.allocator,
     );
     const val = "Hello, World!";
-    try packer.pack(String(val));
+    try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
@@ -422,7 +423,7 @@ test "Serialize 8-bit length string" {
         testing.allocator,
     );
     const val = "t" ** 32;
-    try packer.pack(String(val));
+    try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
@@ -436,7 +437,7 @@ test "Serialize 16-bit length string" {
         testing.allocator,
     );
     const val = "t" ** 256;
-    try packer.pack(String(val));
+    try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
@@ -450,11 +451,25 @@ test "Serialize 32-bit length string" {
         testing.allocator,
     );
     const val = "t" ** 65536;
-    try packer.pack(String(val));
+    try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
         "\xdb\x00\x01\x00\x00" ++ val,
+        actual,
+    );
+}
+
+test "Serialize 8-bit length string from statically sized array" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = [_]u8{0x71} ** 32;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd9" ++ .{32} ++ val,
         actual,
     );
 }
@@ -464,7 +479,7 @@ test "Serialize 8-bit length binary string" {
         testing.allocator,
     );
     const val = "t" ** 32;
-    try packer.pack(val);
+    try packer.pack(Bin(val));
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
@@ -478,7 +493,7 @@ test "Serialize 16-bit length binary string" {
         testing.allocator,
     );
     const val = "t" ** 0x0100;
-    try packer.pack(val);
+    try packer.pack(Bin(val));
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
@@ -492,7 +507,7 @@ test "Serialize 32-bit length binary string" {
         testing.allocator,
     );
     const val = "t" ** 0x0001_0000;
-    try packer.pack(val);
+    try packer.pack(Bin(val));
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
@@ -594,6 +609,7 @@ test "Serialize FixMap" {
         testing.allocator,
     );
     var val = std.StringArrayHashMap(i32).init(testing.allocator);
+    defer val.deinit();
     try val.put("key1", 0x0EADBEEF);
     try val.put("key2", 32);
     try val.put("key3", -1);
@@ -601,37 +617,37 @@ test "Serialize FixMap" {
     const actual = packer.finish();
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
-        "\x83\xA4key1\xce\x0E\xAD\xBE\xEF\xA4key2\x20\xA4key3\xFF",
+        "\x83\xA4key1\xd2\x0E\xAD\xBE\xEF\xA4key2\x20\xA4key3\xFF",
         actual,
     );
 }
 
-// test "Serialize 16-bit length map" {
-//     var packer = try Packer.init(
-//         testing.allocator,
-//     );
-//     const len = 0b0001_0000;
-//     const val: [len]u32 = .{0xDEADBEEF} ** len;
-//     try packer.pack(val);
-//     const actual = packer.finish();
-//     defer testing.allocator.free(actual);
-//     try testing.expectEqualStrings(
-//         "\xdc\x00\x10" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
-//         actual,
-//     );
-// }
+test "Serialize 16-bit length map" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const len = 0b0001_0000;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdc\x00\x10" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        actual,
+    );
+}
 
-// test "Serialize 32-bit length map" {
-//     var packer = try Packer.init(
-//         testing.allocator,
-//     );
-//     const len = 0x00_01_00_00;
-//     const val: [len]u32 = .{0xDEADBEEF} ** len;
-//     try packer.pack(val);
-//     const actual = packer.finish();
-//     defer testing.allocator.free(actual);
-//     try testing.expectEqualStrings(
-//         "\xdd\x00\x01\x00\x00" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
-//         actual,
-//     );
-// }
+test "Serialize 32-bit length map" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const len = 0x00_01_00_00;
+    const val: [len]u32 = .{0xDEADBEEF} ** len;
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xdd\x00\x01\x00\x00" ++ ("\xce\xDE\xAD\xBE\xEF" ** len),
+        actual,
+    );
+}

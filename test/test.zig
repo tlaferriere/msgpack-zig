@@ -115,7 +115,7 @@ test "32-bit length string round_trip" {
         testing.allocator,
     );
     const val = "t" ** 0x0001_0000;
-    try packer.pack(msgpack.String(val));
+    try packer.pack(val);
     const buffer = packer.finish();
     defer testing.allocator.free(buffer);
     var message = try msgpack.Unpacker.init(

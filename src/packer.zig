@@ -14,7 +14,7 @@ pub const SerializeError = error{
     MapTooLarge,
 };
 
-const StringType = struct {
+const BinType = struct {
     str: []const u8,
 };
 
@@ -22,24 +22,24 @@ const StringType = struct {
 ///
 /// Since there is no distinction in Zig between strings and []u8, we provide
 /// a newtype to signal to msgpack that you wish these bytes to be packed as
-/// a string.
-pub fn String(str: []const u8) StringType {
-    return StringType{ .str = str };
+/// a bin.
+pub fn Bin(str: []const u8) BinType {
+    return BinType{ .str = str };
 }
 
-test String {
+test Bin {
     var packer = try Packer.init(
         testing.allocator,
     );
     const val = "Hello, World!";
-    try packer.pack(String(val));
+    try packer.pack(Bin(val));
 
     const actual = packer.finish();
     defer testing.allocator.free(actual);
 
     try testing.expectEqualStrings(
         // Packed with the special markers for strings
-        "\xAD" ++ val,
+        "\xc4" ++ .{13} ++ val,
         actual,
     );
 }
@@ -121,8 +121,8 @@ pub const Packer = struct {
                 try self.write_float(@TypeOf(object), object);
             },
             .Struct => {
-                if (T == StringType) {
-                    return self.write_string(object.str);
+                if (T == BinType) {
+                    return self.write_bin(object.str);
                 }
                 if (@hasDecl(T, "iterator") and
                     @hasDecl(T, "Iterator") and
@@ -135,12 +135,15 @@ pub const Packer = struct {
                 }
                 @compileError("Struct not supported yet.");
             },
-            .Array => |array| self.write_array(array.len, object),
-            .Pointer => |pointer| if (@typeInfo(pointer.child).Array.child == u8)
-                try self.write_bin(object)
-            else switch (pointer.size) {
+            .Array => |array| if (array.child == u8)
+                self.write_string(&object)
+            else
+                self.write_array(array.len, object),
+            .Pointer => |pointer| switch (pointer.size) {
                 .One => self.write(object.*),
-                .Slice, .Many => self.write_array(null, object),
+                .Slice, .Many => if (pointer.child == u8) {
+                    try self.write_string(object);
+                } else self.write_array(null, object),
                 .C => {
                     @compileLog(pointer);
                     @compileError("C sized pointer is not supported.");
@@ -314,6 +317,7 @@ pub const Packer = struct {
         }
 
         @memcpy(self.buffer[self.offset .. self.offset + len], string);
+        self.offset += len;
     }
 
     fn write_bin(self: *Packer, string: []const u8) !void {
@@ -362,6 +366,7 @@ pub const Packer = struct {
         }
 
         @memcpy(self.buffer[self.offset .. self.offset + len], string);
+        self.offset += len;
     }
 
     fn write_array(self: *Packer, comptime static_len: ?usize, array: anytype) !void {
@@ -372,7 +377,7 @@ pub const Packer = struct {
 
         const mark =
             if (len <= std.math.maxInt(u4))
-            Marker{ .FixArray = len }
+            Marker{ .FixArray = @intCast(len) }
         else if (len <= std.math.maxInt(u16))
             Marker{ .Array_16 = 0 }
         else if (len <= std.math.maxInt(u32))
@@ -401,7 +406,7 @@ pub const Packer = struct {
                         [2]u8,
                         self.buffer[self.offset .. self.offset + 2],
                     ),
-                    len,
+                    @intCast(len),
                     Endian.big,
                 );
                 self.offset += 2;
@@ -413,7 +418,7 @@ pub const Packer = struct {
                         [4]u8,
                         self.buffer[self.offset .. self.offset + 4],
                     ),
-                    len,
+                    @intCast(len),
                     Endian.big,
                 );
                 self.offset += 4;
@@ -479,8 +484,8 @@ pub const Packer = struct {
         }
         var iter = map.iterator();
         while (iter.next()) |entry| {
-            try self.write(entry.key_ptr.*);
-            try self.write(entry.value_ptr.*);
+            try self.write(entry.key_ptr);
+            try self.write(entry.value_ptr);
         }
     }
 };
@@ -495,8 +500,8 @@ fn packed_size(object: anytype) !usize {
         else
             packed_size(object.?),
         .Float => float_packed_size(@TypeOf(object)),
-        .Struct => if (T == StringType)
-            string_packed_size(object.str)
+        .Struct => if (T == BinType)
+            bin_packed_size(object.str)
         else if (@hasDecl(T, "iterator") and
             @hasDecl(T, "Iterator") and
             @hasDecl(T, "Entry") and
@@ -513,15 +518,17 @@ fn packed_size(object: anytype) !usize {
             @compileError("Structs not supported yet.");
         },
         .Array => |array| if (array.child == u8)
-            bin_packed_size(object)
+            bin_packed_size(&object)
         else
-            array_packed_size(array, object),
+            array_packed_size(array.len, object),
         .Pointer => |pointer| switch (pointer.size) {
             .One => if (@typeInfo(pointer.child) == .Array and
                 @typeInfo(pointer.child).Array.child == u8)
-                bin_packed_size(object)
+                string_packed_size(object)
             else
                 packed_size(object.*),
+            .Slice, .Many => array_packed_size(null, object),
+            .C => @compileError("C sized pointer."),
         },
         else => {
             @compileLog(T);
@@ -582,12 +589,13 @@ fn bin_packed_size(bin: []const u8) !usize {
         SerializeError.StringTooLarge;
 }
 
-fn array_packed_size(comptime info: Type.Array, array: anytype) !usize {
-    var packed_len: usize = if (info.len <= std.math.maxInt(u4))
+fn array_packed_size(comptime len: ?usize, array: anytype) !usize {
+    const array_len = if (len == null) array.len else len.?;
+    var packed_len: usize = if (array_len <= std.math.maxInt(u4))
         1
-    else if (info.len <= std.math.maxInt(u16))
+    else if (array_len <= std.math.maxInt(u16))
         3
-    else if (info.len <= std.math.maxInt(u32))
+    else if (array_len <= std.math.maxInt(u32))
         5
     else
         return SerializeError.ArrayTooLarge;
