@@ -61,6 +61,19 @@ pub const Unpacker = struct {
                 .C => @compileError("C sized pointer."),
             },
             .Array => |array| self.unpack_array(array.len, As),
+            .Struct => {
+                if (@hasDecl(As, "put") and
+                    ((@hasDecl(As, "init") and
+                    @typeInfo(@TypeOf(As.put)).Fn.params.len == 3) or
+                    @typeInfo(@TypeOf(As.put)).Fn.params.len == 4) and
+                    @hasDecl(As, "KV"))
+                {
+                    return self.unpack_map(As);
+                }
+                @compileLog(As);
+                @compileLog(@typeInfo(As));
+                @compileError("Structs not supported yet.");
+            },
             else => {
                 @compileLog(As);
                 @compileLog(@typeInfo(As));
@@ -252,7 +265,7 @@ pub const Unpacker = struct {
         };
         const str = try self.allocator.alloc(u8, len);
         @memcpy(str, self.buffer[self.offset .. self.offset + len]);
-        self.offset += 1 + len;
+        self.offset += len;
         return @as(As, str);
     }
 
@@ -309,5 +322,42 @@ pub const Unpacker = struct {
             element.* = try self.unpack_as(@TypeOf(element.*));
         }
         return array;
+    }
+
+    fn unpack_map(self: *Unpacker, comptime As: type) !As {
+        var map: As = As.init(self.allocator);
+        const len = switch (try marker.decode(self.buffer[self.offset])) {
+            .FixMap => |len| blk: {
+                self.offset += 1;
+                break :blk len;
+            },
+            .Map_16 => blk: {
+                const len = std.mem.readVarInt(
+                    u16,
+                    self.buffer[self.offset + 1 .. self.offset + 3],
+                    Endian.big,
+                );
+                self.offset += 3;
+                break :blk len;
+            },
+            .Map_32 => blk: {
+                const len = std.mem.readVarInt(
+                    u32,
+                    self.buffer[self.offset + 1 .. self.offset + 5],
+                    Endian.big,
+                );
+                self.offset += 5;
+                break :blk len;
+            },
+            else => return DeserializeError.WrongType,
+        };
+        try map.ensureTotalCapacity(len);
+        for (0..len) |_| {
+            try map.put(
+                try self.unpack_as(std.meta.FieldType(As.KV, .key)),
+                try self.unpack_as(std.meta.FieldType(As.KV, .value)),
+            );
+        }
+        return map;
     }
 };

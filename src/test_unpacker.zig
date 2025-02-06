@@ -473,3 +473,31 @@ test "Deserialize slice as 32-bit length array" {
         unpacked,
     );
 }
+
+test "Deserialize FixMap" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\x83\xA4key1\xd2\x0E\xAD\xBE\xEF\xA4key2\x20\xA4key3\xFF",
+        0,
+    );
+    var val = std.StringArrayHashMap(i32).init(testing.allocator);
+    defer val.deinit();
+    try val.put("key1", 0x0EADBEEF);
+    try val.put("key2", 32);
+    try val.put("key3", -1);
+    var unpacked = try message.unpack_as(std.StringArrayHashMap(i32));
+    defer {
+        for (unpacked.keys()) |key| {
+            testing.allocator.free(key);
+        }
+        unpacked.deinit();
+    }
+    try testing.expectEqualDeep(
+        val.keys(),
+        unpacked.keys(),
+    );
+    try testing.expectEqualDeep(
+        val.values(),
+        unpacked.values(),
+    );
+}
