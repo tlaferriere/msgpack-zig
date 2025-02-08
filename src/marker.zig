@@ -199,6 +199,7 @@ pub fn encode(marker: Marker) u8 {
     }
     unreachable;
 }
+
 test "FixPositive is a u7" {
     const un = Marker{ .FixPositive = 8 };
     try testing.expectEqual(u7, @TypeOf(un.FixPositive));

@@ -6,13 +6,32 @@ const Marker = marker.Marker;
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
-pub const DeserializeError = error{ TypeTooSmall, WrongType, Finished, WrongArrayLength };
 
+/// Deserialization Errors
+pub const DeserializeError = error{
+    TypeTooSmall,
+    WrongType,
+    Finished,
+    WrongArrayLength,
+    WrongExtType,
+};
+
+/// Msgpack unpacker.
+///
+/// # Memory safety
+/// This object **_borrows_** the buffer you wish to unpack, therefore it is your
+/// responsiblity to ensure the buffer lives long enough for you to unpack
+/// everything you want before freeing this buffer.
+///
+/// All values read from this buffer are copied out, hence the allocator for
+/// runtime-sized types.
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
     buffer: []const u8,
     offset: usize,
 
+    /// Initialize a msgpack unpacker with a **_borrowed_** message buffer
+    /// slice.
     pub fn init(
         allocator: std.mem.Allocator,
         buffer: []const u8,
@@ -25,6 +44,43 @@ pub const Unpacker = struct {
         };
     }
 
+    /// Unpack an object from the buffer.
+    ///
+    /// # Memory Safety
+    /// This method will attempt to unpack an object of the type you pass in.
+    /// In all cases this method will copy the memory, decoupling the value's
+    /// lifetime from the msgpacked buffer's lifetime.
+    ///
+    /// If the type's size is only known at runtime, it will be allocated with
+    /// the allocator provided to `init` and ownership of the object is
+    /// transferred to the caller.
+    ///
+    /// # Type Families
+    /// Msgpack has a few different type families with their particularities.
+    ///
+    /// ## Integers
+    /// TODO
+    ///
+    /// ## Floats
+    /// TODO
+    ///
+    /// ## Strings and Binary Strings
+    /// TODO
+    ///
+    /// ## Arrays
+    /// TODO
+    ///
+    /// ## Maps
+    /// TODO
+    ///
+    /// ## Extension types
+    /// You can define extension types by creating a struct with a
+    /// `__msgpack_repr__` declaration with type `msgpack.Repr`.
+    /// Specifically, you must use the `Repr.Ext` and provide the `type_id` (a
+    /// `u8`) and a callback taking a byte slice.
+    ///
+    /// The callback takes ownership of the byte-slice, therefore it is your
+    /// responsibility to free the memory once you are done with it.
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .Int => |int| self.unpack_int(int, As),
@@ -70,9 +126,30 @@ pub const Unpacker = struct {
                 {
                     return self.unpack_map(As);
                 }
+                if (@hasDecl(As, "__msgpack_repr__")) {
+                    switch (As.__msgpack_repr__) {
+                        .Ext => |ext| {
+                            return self.unpack_ext(
+                                As,
+                                ext.type_id,
+                                ext.callback,
+                            );
+                        },
+                    }
+                }
                 @compileLog(As);
-                @compileLog(@typeInfo(As));
-                @compileError("Structs not supported yet.");
+                @compileLog(@typeInfo(As).Struct.decls);
+                @compileError(std.fmt.comptimePrint(
+                    \\I don't know how to deserialize your struct {}.
+                    \\Please add a `__msgpack_repr__` declaration to your struct with type `msgpack.Repr`:
+                    \\Suggested: 
+                    \\```
+                    \\    const {} = struct {{
+                    \\        ...
+                    \\        const __msgpack_repr__ = msgpack.Repr{{...}};
+                    \\    }}
+                    \\```
+                , .{ .a = As, .b = As }));
             },
             else => {
                 @compileLog(As);
@@ -269,7 +346,11 @@ pub const Unpacker = struct {
         return @as(As, str);
     }
 
-    fn unpack_array(self: *Unpacker, comptime target_len: ?usize, comptime As: type) !As {
+    fn unpack_array(
+        self: *Unpacker,
+        comptime target_len: ?usize,
+        comptime As: type,
+    ) !As {
         const info = @typeInfo(As);
         var array: As = undefined;
         switch (try marker.decode(self.buffer[self.offset])) {
@@ -359,5 +440,67 @@ pub const Unpacker = struct {
             );
         }
         return map;
+    }
+
+    fn unpack_ext(
+        self: *Unpacker,
+        comptime As: type,
+        comptime type_id: u8,
+        comptime callback: anytype,
+    ) !As {
+        const metadata = try self.ext_decode();
+        if (metadata.type_id != type_id) {
+            return DeserializeError.WrongExtType;
+        }
+        const slice = try self.allocator.alloc(u8, metadata.len);
+        @memcpy(slice, self.buffer[self.offset .. self.offset + metadata.len]);
+        return callback(self.allocator, slice);
+    }
+
+    const ExtMetadata = struct {
+        type_id: u8,
+        len: usize,
+    };
+
+    fn ext_decode(self: *Unpacker) !ExtMetadata {
+        const mark = try marker.decode(self.buffer[self.offset]);
+        self.offset += 1;
+        const len: usize = switch (mark) {
+            .FixExt_1 => 1,
+            .FixExt_2 => 2,
+            .FixExt_4 => 4,
+            .FixExt_8 => 8,
+            .FixExt_16 => 16,
+            .Ext_8 => blk: {
+                const len = self.buffer[self.offset];
+                self.offset += 1;
+                break :blk len;
+            },
+            .Ext_16 => blk: {
+                const len = std.mem.readVarInt(
+                    u16,
+                    self.buffer[self.offset .. self.offset + 2],
+                    Endian.big,
+                );
+                self.offset += 2;
+                break :blk len;
+            },
+            .Ext_32 => blk: {
+                const len = std.mem.readVarInt(
+                    u32,
+                    self.buffer[self.offset .. self.offset + 4],
+                    Endian.big,
+                );
+                self.offset += 4;
+                break :blk len;
+            },
+            else => return DeserializeError.WrongType,
+        };
+        const type_id = self.buffer[self.offset];
+        self.offset += 1;
+        return ExtMetadata{
+            .type_id = type_id,
+            .len = len,
+        };
     }
 };

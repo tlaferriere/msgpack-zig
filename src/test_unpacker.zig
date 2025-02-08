@@ -1,8 +1,10 @@
 const std = @import("std");
+const builtin = @import("builtin");
 const testing = std.testing;
 
 const Unpacker = @import("unpacker.zig").Unpacker;
 const DeserializeError = @import("unpacker.zig").DeserializeError;
+const Repr = @import("repr.zig").Repr;
 
 test "Deserialize false" {
     var message = try Unpacker.init(
@@ -499,5 +501,193 @@ test "Deserialize FixMap" {
     try testing.expectEqualDeep(
         val.values(),
         unpacked.values(),
+    );
+}
+
+const MyDeserializeError = error{OhNo};
+const MyType = struct {
+    buf: []const u8,
+
+    pub const __msgpack_repr__ = Repr(
+        MyType,
+        MyDeserializeError,
+    ){
+        .Ext = .{
+            .type_id = 0x71,
+            .callback = &msgpack.unpack_ext,
+        },
+    };
+    const msgpack = struct {
+        fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+            errdefer allocator.free(data);
+            for (data) |b| {
+                if (b == 0xFF) {
+                    return MyDeserializeError.OhNo;
+                }
+            }
+            return MyType{ .buf = data };
+        }
+    };
+};
+
+test "Deserialize FixExt_1 callback error" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd4\x71\xFF",
+        0,
+    );
+
+    const unpacked = message.unpack_as(MyType);
+    try testing.expectError(
+        MyDeserializeError.OhNo,
+        unpacked,
+    );
+}
+
+test "Deserialize FixExt_1 wrong type id" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd4\x01\xFF",
+        0,
+    );
+
+    const unpacked = message.unpack_as(MyType);
+    try testing.expectError(
+        DeserializeError.WrongExtType,
+        unpacked,
+    );
+}
+
+test "Deserialize FixExt_1 right type" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd4\x71\xEF",
+        0,
+    );
+
+    const val = MyType{ .buf = "\xEF" };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize FixExt_2 right type" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd5\x71\xBE\xEF",
+        0,
+    );
+
+    const val = MyType{ .buf = "\xBE\xEF" };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize FixExt_4 right type" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd6\x71\xDE\xAD\xBE\xEF",
+        0,
+    );
+
+    const val = MyType{ .buf = "\xDE\xAD\xBE\xEF" };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize FixExt_8 right type" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd7\x71\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        0,
+    );
+
+    const val = MyType{ .buf = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF" };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize FixExt_16 right type" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd8\x71\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        0,
+    );
+
+    const val = MyType{ .buf = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF" };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize Ext_8 right type" {
+    const len = 255;
+    const content = ("\xDE" ** len);
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc7\xFF\x71" ++ content,
+        0,
+    );
+
+    const val = MyType{ .buf = content };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize Ext_16 right type" {
+    const len = 0xFF_FF;
+    const content = ("\xDE" ** len);
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc8\xFF\xFF\x71" ++ content,
+        0,
+    );
+
+    const val = MyType{ .buf = content };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize Ext_32 right type" {
+    const len = 0x00_01_00_00;
+    const content = ("\xDE" ** len);
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc9\x00\x01\x00\x00\x71" ++ content,
+        0,
+    );
+
+    const val = MyType{ .buf = content };
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
     );
 }
