@@ -2,6 +2,7 @@ const std = @import("std");
 const marker = @import("marker.zig");
 const Marker = marker.Marker;
 const PackingRepr = @import("repr.zig").PackingRepr;
+const maxInt = std.math.maxInt;
 
 const testing = std.testing;
 const Endian = std.builtin.Endian;
@@ -200,7 +201,7 @@ pub const Packer = struct {
     }
 
     fn write_int(self: *Packer, comptime T: type, value: T) !void {
-        if (std.math.minInt(i6) <= value and value <= std.math.maxInt(u7)) {
+        if (std.math.minInt(i6) <= value and value <= maxInt(u7)) {
             const mark = marker.encode(if (std.math.sign(value) == -1)
                 Marker{ .FixNegative = @bitCast(@as(i5, @truncate(value))) }
             else
@@ -238,7 +239,7 @@ pub const Packer = struct {
                     .bits = byte_count * 8,
                 },
             });
-            if (std.math.minInt(i) <= value and value <= std.math.maxInt(u)) {
+            if (std.math.minInt(i) <= value and value <= maxInt(u)) {
                 comptime var type_info = @typeInfo(T);
                 type_info.Int.bits = byte_count * 8;
                 const OutType = @Type(type_info);
@@ -250,7 +251,7 @@ pub const Packer = struct {
                         self.buffer[self.offset .. self.offset + 1],
                     ),
                     marker.encode(
-                        if (type_info.Int.signedness == .signed and value <= std.math.maxInt(OutType))
+                        if (type_info.Int.signedness == .signed and value <= maxInt(OutType))
                             mark.signed
                         else
                             mark.unsigned,
@@ -277,13 +278,13 @@ pub const Packer = struct {
     fn write_string(self: *Packer, string: []const u8) !void {
         const len = string.len;
         const mark =
-            if (len < std.math.maxInt(u5))
+            if (len < maxInt(u5))
             Marker{ .FixStr = @intCast(len) }
-        else if (len <= std.math.maxInt(u8))
+        else if (len <= maxInt(u8))
             Marker{ .Str_8 = 0 }
-        else if (len <= std.math.maxInt(u16))
+        else if (len <= maxInt(u16))
             Marker{ .Str_16 = 0 }
-        else if (len <= std.math.maxInt(u32))
+        else if (len <= maxInt(u32))
             Marker{ .Str_32 = 0 }
         else {
             return SerializeError.StringTooLarge;
@@ -328,11 +329,11 @@ pub const Packer = struct {
     fn write_bin(self: *Packer, string: []const u8) !void {
         const len = string.len;
         const mark =
-            if (len <= std.math.maxInt(u8))
+            if (len <= maxInt(u8))
             Marker{ .Bin_8 = 0 }
-        else if (len <= std.math.maxInt(u16))
+        else if (len <= maxInt(u16))
             Marker{ .Bin_16 = 0 }
-        else if (len <= std.math.maxInt(u32))
+        else if (len <= maxInt(u32))
             Marker{ .Bin_32 = 0 }
         else {
             return SerializeError.StringTooLarge;
@@ -381,11 +382,11 @@ pub const Packer = struct {
             static_len.?;
 
         const mark =
-            if (len <= std.math.maxInt(u4))
+            if (len <= maxInt(u4))
             Marker{ .FixArray = @intCast(len) }
-        else if (len <= std.math.maxInt(u16))
+        else if (len <= maxInt(u16))
             Marker{ .Array_16 = 0 }
-        else if (len <= std.math.maxInt(u32))
+        else if (len <= maxInt(u32))
             Marker{ .Array_32 = 0 }
         else {
             return SerializeError.ArrayTooLarge;
@@ -438,11 +439,11 @@ pub const Packer = struct {
     fn write_map(self: *Packer, map: anytype) !void {
         const count = map.count();
         const mark =
-            if (count <= std.math.maxInt(u4))
+            if (count <= maxInt(u4))
             Marker{ .FixMap = @intCast(count) }
-        else if (count <= std.math.maxInt(u16))
+        else if (count <= maxInt(u16))
             Marker{ .Map_16 = 0 }
-        else if (count <= std.math.maxInt(u32))
+        else if (count <= maxInt(u32))
             Marker{ .Map_32 = 0 }
         else {
             return SerializeError.MapTooLarge;
@@ -509,11 +510,11 @@ pub const Packer = struct {
             4 => Marker{ .FixExt_4 = 0 },
             8 => Marker{ .FixExt_8 = 0 },
             16 => Marker{ .FixExt_16 = 0 },
-            3, 5...7, 9...15, 17...std.math.maxInt(u8) => Marker{ .Ext_8 = 0 },
-            std.math.maxInt(u8) + 1...std.math.maxInt(u16) => Marker{
+            3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
+            maxInt(u8) + 1...maxInt(u16) => Marker{
                 .Ext_16 = 0,
             },
-            std.math.maxInt(u16) + 1...std.math.maxInt(u32) => Marker{
+            maxInt(u16) + 1...maxInt(u32) => Marker{
                 .Ext_32 = 0,
             },
             else => {
@@ -565,9 +566,11 @@ pub const Packer = struct {
         self.buffer[self.offset] = @bitCast(ext.type_id);
         self.offset += 1;
 
+        const custom_buffer = try ext.pack(object, self.allocator);
+        defer self.allocator.free(custom_buffer);
         @memcpy(
             self.buffer[self.offset .. self.offset + size],
-            try ext.pack(object, self.allocator),
+            custom_buffer,
         );
         self.offset += size;
     }
@@ -623,15 +626,15 @@ fn packed_size(object: anytype) !usize {
 }
 
 fn int_packed_size(comptime T: type, value: T) !usize {
-    return if (std.math.minInt(i6) <= value and value <= std.math.maxInt(u7))
+    return if (std.math.minInt(i6) <= value and value <= maxInt(u7))
         1
-    else if (std.math.minInt(i8) <= value and value <= std.math.maxInt(u8))
+    else if (std.math.minInt(i8) <= value and value <= maxInt(u8))
         2
-    else if (std.math.minInt(i16) <= value and value <= std.math.maxInt(u16))
+    else if (std.math.minInt(i16) <= value and value <= maxInt(u16))
         3
-    else if (std.math.minInt(i32) <= value and value <= std.math.maxInt(u32))
+    else if (std.math.minInt(i32) <= value and value <= maxInt(u32))
         5
-    else if (std.math.minInt(i64) <= value and value <= std.math.maxInt(u64))
+    else if (std.math.minInt(i64) <= value and value <= maxInt(u64))
         9
     else
         SerializeError.TypeTooLarge;
@@ -650,13 +653,13 @@ fn float_packed_size(comptime T: type) !usize {
 
 fn string_packed_size(string: []const u8) !usize {
     const bytes_needed = string.len;
-    return if (bytes_needed <= std.math.maxInt(u5))
+    return if (bytes_needed <= maxInt(u5))
         1 + bytes_needed
-    else if (bytes_needed <= std.math.maxInt(u8))
+    else if (bytes_needed <= maxInt(u8))
         2 + bytes_needed
-    else if (bytes_needed <= std.math.maxInt(u16))
+    else if (bytes_needed <= maxInt(u16))
         3 + bytes_needed
-    else if (bytes_needed <= std.math.maxInt(u32))
+    else if (bytes_needed <= maxInt(u32))
         5 + bytes_needed
     else
         SerializeError.StringTooLarge;
@@ -664,11 +667,11 @@ fn string_packed_size(string: []const u8) !usize {
 
 fn bin_packed_size(bin: []const u8) !usize {
     const bytes_needed = bin.len;
-    return if (bytes_needed <= std.math.maxInt(u8))
+    return if (bytes_needed <= maxInt(u8))
         2 + bytes_needed
-    else if (bytes_needed <= std.math.maxInt(u16))
+    else if (bytes_needed <= maxInt(u16))
         3 + bytes_needed
-    else if (bytes_needed <= std.math.maxInt(u32))
+    else if (bytes_needed <= maxInt(u32))
         5 + bytes_needed
     else
         SerializeError.StringTooLarge;
@@ -676,11 +679,11 @@ fn bin_packed_size(bin: []const u8) !usize {
 
 fn array_packed_size(comptime len: ?usize, array: anytype) !usize {
     const array_len = if (len == null) array.len else len.?;
-    var packed_len: usize = if (array_len <= std.math.maxInt(u4))
+    var packed_len: usize = if (array_len <= maxInt(u4))
         1
-    else if (array_len <= std.math.maxInt(u16))
+    else if (array_len <= maxInt(u16))
         3
-    else if (array_len <= std.math.maxInt(u32))
+    else if (array_len <= maxInt(u32))
         5
     else
         return SerializeError.ArrayTooLarge;
@@ -692,11 +695,11 @@ fn array_packed_size(comptime len: ?usize, array: anytype) !usize {
 
 fn map_packed_size(map: anytype) !usize {
     const count = map.count();
-    var packed_len: usize = if (count <= std.math.maxInt(u4))
+    var packed_len: usize = if (count <= maxInt(u4))
         1
-    else if (count <= std.math.maxInt(u16))
+    else if (count <= maxInt(u16))
         3
-    else if (count <= std.math.maxInt(u32))
+    else if (count <= maxInt(u32))
         5
     else
         return SerializeError.ArrayTooLarge;
@@ -709,17 +712,22 @@ fn map_packed_size(map: anytype) !usize {
 }
 
 fn struct_packed_size(object: anytype) !usize {
-    return switch (@TypeOf(object).__msgpack_pack_repr__) {
-        .Ext => |ext| blk: {
+    switch (@TypeOf(object).__msgpack_pack_repr__) {
+        .Ext => |ext| {
             const size = try ext.packed_size(object);
-            if (size > std.math.maxInt(u32)) {
-                return SerializeError.ExtTooLarge;
-            }
-            break :blk size;
+            const marker_overhead_bytes = 2;
+            const length_overhead_bytes: usize = switch (size) {
+                1, 2, 4, 8, 16 => 0,
+                3, 5...7, 9...15, 17...maxInt(u8) => 1,
+                maxInt(u8) + 1...maxInt(u16) => 2,
+                maxInt(u16) + 1...maxInt(u32) => 4,
+                else => return SerializeError.ExtTooLarge,
+            };
+            return marker_overhead_bytes + length_overhead_bytes + size;
         },
         // else => {
         //     @compileLog(@TypeOf(object).__msgpack_pack_repr__);
         //     @compileError("Struct size cannot be evaluated.");
         // },
-    };
+    }
 }
