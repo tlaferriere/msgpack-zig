@@ -1,6 +1,7 @@
 const std = @import("std");
 const marker = @import("marker.zig");
 const Marker = marker.Marker;
+const PackingRepr = @import("repr.zig").PackingRepr;
 
 const testing = std.testing;
 const Endian = std.builtin.Endian;
@@ -12,6 +13,7 @@ pub const SerializeError = error{
     StringTooLarge,
     ArrayTooLarge,
     MapTooLarge,
+    ExtTooLarge,
 };
 
 const BinType = struct {
@@ -132,6 +134,9 @@ pub const Packer = struct {
                     @hasDecl(T, "count"))
                 {
                     return self.write_map(object);
+                }
+                if (@hasDecl(T, "__msgpack_pack_repr__")) {
+                    return self.write_struct(object);
                 }
                 @compileError("Struct not supported yet.");
             },
@@ -488,6 +493,84 @@ pub const Packer = struct {
             try self.write(entry.value_ptr);
         }
     }
+
+    fn write_struct(self: *Packer, object: anytype) !void {
+        switch (@TypeOf(object).__msgpack_pack_repr__) {
+            .Ext => |ext| try self.write_ext(object, ext),
+        }
+    }
+
+    fn write_ext(self: *Packer, object: anytype, ext: anytype) !void {
+        const size = try ext.packed_size(object);
+        const mark =
+            switch (size) {
+            1 => Marker{ .FixExt_1 = 0 },
+            2 => Marker{ .FixExt_2 = 0 },
+            4 => Marker{ .FixExt_4 = 0 },
+            8 => Marker{ .FixExt_8 = 0 },
+            16 => Marker{ .FixExt_16 = 0 },
+            3, 5...7, 9...15, 17...std.math.maxInt(u8) => Marker{ .Ext_8 = 0 },
+            std.math.maxInt(u8) + 1...std.math.maxInt(u16) => Marker{
+                .Ext_16 = 0,
+            },
+            std.math.maxInt(u16) + 1...std.math.maxInt(u32) => Marker{
+                .Ext_32 = 0,
+            },
+            else => {
+                unreachable;
+            },
+        };
+
+        self.buffer[self.offset] = marker.encode(mark);
+        self.offset += 1;
+
+        switch (mark) {
+            .FixExt_1,
+            .FixExt_2,
+            .FixExt_4,
+            .FixExt_8,
+            .FixExt_16,
+            => {},
+            .Ext_8 => {
+                self.buffer[self.offset] = @intCast(size);
+                self.offset += 1;
+            },
+            .Ext_16 => {
+                std.mem.writeInt(
+                    u16,
+                    std.mem.bytesAsValue(
+                        [2]u8,
+                        self.buffer[self.offset .. self.offset + 2],
+                    ),
+                    @intCast(size),
+                    Endian.big,
+                );
+                self.offset += 2;
+            },
+            .Ext_32 => {
+                std.mem.writeInt(
+                    u32,
+                    std.mem.bytesAsValue(
+                        [4]u8,
+                        self.buffer[self.offset .. self.offset + 4],
+                    ),
+                    @intCast(size),
+                    Endian.big,
+                );
+                self.offset += 4;
+            },
+            else => unreachable,
+        }
+
+        self.buffer[self.offset] = @bitCast(ext.type_id);
+        self.offset += 1;
+
+        @memcpy(
+            self.buffer[self.offset .. self.offset + size],
+            try ext.pack(object, self.allocator),
+        );
+        self.offset += size;
+    }
 };
 
 fn packed_size(object: anytype) !usize {
@@ -509,6 +592,8 @@ fn packed_size(object: anytype) !usize {
             @hasField(T.Entry, "value_ptr") and
             @hasDecl(T, "count"))
             map_packed_size(object)
+        else if (@hasDecl(T, "__msgpack_pack_repr__"))
+            struct_packed_size(object)
         else {
             @compileLog(@typeName(T));
             @compileLog(T);
@@ -621,4 +706,20 @@ fn map_packed_size(map: anytype) !usize {
         packed_len += try packed_size(entry.value_ptr.*);
     }
     return packed_len;
+}
+
+fn struct_packed_size(object: anytype) !usize {
+    return switch (@TypeOf(object).__msgpack_pack_repr__) {
+        .Ext => |ext| blk: {
+            const size = try ext.packed_size(object);
+            if (size > std.math.maxInt(u32)) {
+                return SerializeError.ExtTooLarge;
+            }
+            break :blk size;
+        },
+        // else => {
+        //     @compileLog(@TypeOf(object).__msgpack_pack_repr__);
+        //     @compileError("Struct size cannot be evaluated.");
+        // },
+    };
 }

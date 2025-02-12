@@ -30,8 +30,7 @@ pub const Unpacker = struct {
     buffer: []const u8,
     offset: usize,
 
-    /// Initialize a msgpack unpacker with a **_borrowed_** message buffer
-    /// slice.
+    /// Initialize a msgpack unpacker with a **_borrowed_** message buffer.
     pub fn init(
         allocator: std.mem.Allocator,
         buffer: []const u8,
@@ -126,16 +125,8 @@ pub const Unpacker = struct {
                 {
                     return self.unpack_map(As);
                 }
-                if (@hasDecl(As, "__msgpack_repr__")) {
-                    switch (As.__msgpack_repr__) {
-                        .Ext => |ext| {
-                            return self.unpack_ext(
-                                As,
-                                ext.type_id,
-                                ext.callback,
-                            );
-                        },
-                    }
+                if (@hasDecl(As, "__msgpack_unpack_repr__")) {
+                    return self.unpack_struct(As);
                 }
                 @compileLog(As);
                 @compileLog(@typeInfo(As).Struct.decls);
@@ -442,6 +433,16 @@ pub const Unpacker = struct {
         return map;
     }
 
+    fn unpack_struct(self: *Unpacker, comptime As: type) !As {
+        return switch (As.__msgpack_unpack_repr__) {
+            .Ext => |ext| self.unpack_ext(
+                As,
+                ext.type_id,
+                ext.callback,
+            ),
+        };
+    }
+
     fn unpack_ext(
         self: *Unpacker,
         comptime As: type,
@@ -453,7 +454,10 @@ pub const Unpacker = struct {
             return DeserializeError.WrongExtType;
         }
         const slice = try self.allocator.alloc(u8, metadata.len);
-        @memcpy(slice, self.buffer[self.offset .. self.offset + metadata.len]);
+        @memcpy(
+            slice,
+            self.buffer[self.offset .. self.offset + metadata.len],
+        );
         return callback(self.allocator, slice);
     }
 

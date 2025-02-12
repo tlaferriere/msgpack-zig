@@ -1,7 +1,8 @@
 const Packer = @import("packer.zig").Packer;
 const SerializeError = @import("packer.zig").SerializeError;
 const Bin = @import("packer.zig").Bin;
-const MyBin = @import("root.zig").MyBin;
+const PackingRepr = @import("repr.zig").PackingRepr;
+const repr = @import("repr.zig");
 
 const std = @import("std");
 const testing = std.testing;
@@ -618,6 +619,152 @@ test "Serialize FixMap" {
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
         "\x83\xA4key1\xd2\x0E\xAD\xBE\xEF\xA4key2\x20\xA4key3\xFF",
+        actual,
+    );
+}
+
+const MySerializeError = error{OhNo};
+const MySizeError = error{OhNo};
+const MyType = struct {
+    buf: []const u8,
+
+    pub const __msgpack_pack_repr__ =
+        repr.PackAsExt(
+        0x71,
+        msgpack.pack_ext,
+        msgpack.packed_size,
+    );
+
+    const msgpack = struct {
+        fn pack_ext(
+            self: MyType,
+            allocator: std.mem.Allocator,
+        ) ![]const u8 {
+            const out = try allocator.alloc(u8, self.buf.len);
+            @memcpy(out, self.buf);
+            return out;
+        }
+
+        fn packed_size(self: MyType) !usize {
+            return self.buf.len;
+        }
+    };
+};
+
+test "Serialize FixExt_1 right type" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = "\xEF" };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd4\x71\xEF",
+        actual,
+    );
+}
+
+test "Serialize FixExt_2 right type" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = "\xBE\xEF" };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd5\x71\xBE\xEF",
+        actual,
+    );
+}
+
+test "Serialize FixExt_4 right type" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = "\xDE\xAD\xBE\xEF" };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd6\x71\xDE\xAD\xBE\xEF",
+        actual,
+    );
+}
+
+test "Serialize FixExt_8 right type" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF" };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd7\x71\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        actual,
+    );
+}
+
+test "Serialize FixExt_16 right type" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF" };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd8\x71\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        actual,
+    );
+}
+
+test "Serialize Ext_8 right type" {
+    const len = 255;
+    const content = ("\xDE" ** len);
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = content };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc7\xFF\x71" ++ content,
+        actual,
+    );
+}
+
+test "Serialize Ext_16 right type" {
+    const len = 0xFF_FF;
+    const content = ("\xDE" ** len);
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = content };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc8\xFF\xFF\x71" ++ content,
+        actual,
+    );
+}
+
+test "Serialize Ext_32 right type" {
+    const len = 0x00_01_00_00;
+    const content = ("\xDE" ** len);
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = MyType{ .buf = content };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc9\x00\x01\x00\x00\x71" ++ content,
         actual,
     );
 }

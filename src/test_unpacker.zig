@@ -4,7 +4,7 @@ const testing = std.testing;
 
 const Unpacker = @import("unpacker.zig").Unpacker;
 const DeserializeError = @import("unpacker.zig").DeserializeError;
-const Repr = @import("repr.zig").Repr;
+const UnpackingRepr = @import("repr.zig").UnpackingRepr;
 
 test "Deserialize false" {
     var message = try Unpacker.init(
@@ -508,7 +508,7 @@ const MyDeserializeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
-    pub const __msgpack_repr__ = Repr(
+    pub const __msgpack_unpack_repr__ = UnpackingRepr(
         MyType,
         MyDeserializeError,
     ){
