@@ -1,4 +1,7 @@
 {
     "zig.path": "${workspaceFolder}/zig/zig-linux-x86_64-0.13.0/zig",
-    "zig.zls.path": "${workspaceFolder}/zig/zls"
+    "zig.zls.path": "${workspaceFolder}/zig/zls",
+    "editor.rulers": [
+        80
+    ]
 }
