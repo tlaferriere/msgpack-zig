@@ -5,6 +5,7 @@ const testing = std.testing;
 const Unpacker = @import("unpacker.zig").Unpacker;
 const DeserializeError = @import("unpacker.zig").DeserializeError;
 const UnpackingRepr = @import("repr.zig").UnpackingRepr;
+const UnpackAsExt = @import("repr.zig").UnpackAsExt;
 
 test "Deserialize false" {
     var message = try Unpacker.init(
@@ -508,15 +509,11 @@ const MyDeserializeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
-    pub const __msgpack_unpack_repr__ = UnpackingRepr(
-        MyType,
-        MyDeserializeError,
-    ){
-        .Ext = .{
-            .type_id = 0x71,
-            .callback = &msgpack.unpack_ext,
-        },
-    };
+    pub const __msgpack_unpack_repr__ = UnpackAsExt(
+        0x71,
+        msgpack.unpack_ext,
+    );
+
     const msgpack = struct {
         fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
             errdefer allocator.free(data);

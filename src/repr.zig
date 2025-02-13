@@ -62,8 +62,40 @@ pub fn PackingRepr(
     };
 }
 
+/// Represent your type in msgpack as an extension type.
+///
+/// This is a convenience method to infer the type parameters to
+/// `UnpackingRepr`.
+///
+/// An extension type is identified by an i8 type id.
+/// You must provide a callback that takes a byte slice and returns an error
+/// union with your type as payload.
+pub fn UnpackAsExt(
+    comptime type_id: u8,
+    comptime unpack: anytype,
+) UnpackingRepr(
+    @typeInfo(
+        @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
+    ).ErrorUnion.payload,
+    @typeInfo(
+        @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
+    ).ErrorUnion.error_set,
+) {
+    return UnpackingRepr(
+        @typeInfo(
+            @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
+        ).ErrorUnion.payload,
+        @typeInfo(
+            @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
+        ).ErrorUnion.error_set,
+    ){ .Ext = .{
+        .type_id = type_id,
+        .callback = &unpack,
+    } };
+}
+
 /// Represent your type in msgpack.
-pub fn UnpackingRepr(comptime T: type, comptime E: type) type {
+pub fn UnpackingRepr(comptime T: type, comptime E: ?type) type {
     return union(Repr) {
         Ext: Ext,
 
@@ -74,7 +106,7 @@ pub fn UnpackingRepr(comptime T: type, comptime E: type) type {
             type_id: i8,
             /// You must provide a callback to unpack your type to and
             /// from msgpack.
-            callback: *const fn (std.mem.Allocator, []const u8) E!T,
+            callback: *const fn (std.mem.Allocator, []const u8) E.?!T,
         };
     };
 }

@@ -375,7 +375,11 @@ pub const Packer = struct {
         self.offset += len;
     }
 
-    fn write_array(self: *Packer, comptime static_len: ?usize, array: anytype) !void {
+    fn write_array(
+        self: *Packer,
+        comptime static_len: ?usize,
+        array: anytype,
+    ) !void {
         const len = if (static_len == null)
             array.len
         else

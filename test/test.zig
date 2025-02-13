@@ -204,7 +204,7 @@ test "16-bit length map round-trip" {
     );
 }
 
-test "Serialize 32-bit length map" {
+test "32-bit length map round-trip" {
     var packer = try msgpack.Packer.init(
         testing.allocator,
     );
@@ -231,5 +231,70 @@ test "Serialize 32-bit length map" {
     try testing.expectEqualDeep(
         val.values(),
         unpacked.values(),
+    );
+}
+
+const MyDeserializeError = error{OhNo};
+const MySerializeError = error{OhNo};
+const MySizeError = error{OhNo};
+const MyType = struct {
+    buf: []const u8,
+
+    pub const __msgpack_pack_repr__ =
+        msgpack.repr.PackAsExt(
+        0x71,
+        pack_ext,
+        packed_size,
+    );
+
+    fn pack_ext(
+        self: MyType,
+        allocator: std.mem.Allocator,
+    ) ![]const u8 {
+        const out = try allocator.alloc(u8, self.buf.len);
+        @memcpy(out, self.buf);
+        return out;
+    }
+
+    fn packed_size(self: MyType) !usize {
+        return self.buf.len;
+    }
+
+    pub const __msgpack_unpack_repr__ = msgpack.repr.UnpackAsExt(
+        0x71,
+        unpack_ext,
+    );
+
+    fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+        errdefer allocator.free(data);
+        for (data) |b| {
+            if (b == 0xFF) {
+                return MyDeserializeError.OhNo;
+            }
+        }
+        return MyType{ .buf = data };
+    }
+};
+
+test "32-bit length ext round-trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const len = 0x00_01_00_00;
+    const content = ("\xDE" ** len);
+    const val = MyType{ .buf = content };
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
     );
 }
