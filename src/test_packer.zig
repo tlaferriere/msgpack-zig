@@ -3,6 +3,7 @@ const SerializeError = @import("packer.zig").SerializeError;
 const Bin = @import("packer.zig").Bin;
 const PackingRepr = @import("repr.zig").PackingRepr;
 const repr = @import("repr.zig");
+const Timestamp = @import("root.zig").Timestamp;
 
 const std = @import("std");
 const testing = std.testing;
@@ -765,6 +766,57 @@ test "Serialize Ext_32 right type" {
     defer testing.allocator.free(actual);
     try testing.expectEqualStrings(
         "\xc9\x00\x01\x00\x00\x71" ++ content,
+        actual,
+    );
+}
+
+test "Serialize FixExt_4 timestamp" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = Timestamp{
+        .nanoseconds = 0,
+        .seconds = 0xDEADBEEF,
+    };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd6\xFF\xDE\xAD\xBE\xEF",
+        actual,
+    );
+}
+
+test "Serialize FixExt_8 timestamp" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = Timestamp{
+        .nanoseconds = 1,
+        .seconds = 0xDEADBEEF,
+    };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xd7\xFF\x00\x00\x00\x04\xDE\xAD\xBE\xEF",
+        actual,
+    );
+}
+
+test "Serialize Ext_8 timestamp" {
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = Timestamp{
+        .nanoseconds = 1,
+        .seconds = 0x0EADBEEFDEADBEEF,
+    };
+    try packer.pack(val);
+    const actual = packer.finish();
+    defer testing.allocator.free(actual);
+    try testing.expectEqualStrings(
+        "\xc7\x0C\xFF\x00\x00\x00\x01\x0E\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
         actual,
     );
 }

@@ -17,7 +17,7 @@ const Repr = enum {
 /// union with your type as payload.
 pub fn PackAsExt(
     /// Type ID.
-    comptime type_id: u8,
+    comptime type_id: i8,
     comptime pack: anytype,
     comptime packed_size: anytype,
 ) PackingRepr(
@@ -77,7 +77,7 @@ pub fn PackingRepr(
 /// You must provide a callback that takes a byte slice and returns an error
 /// union with your type as payload.
 pub fn UnpackAsExt(
-    comptime type_id: u8,
+    comptime type_id: i8,
     comptime unpack: anytype,
 ) UnpackingRepr(
     @typeInfo(
