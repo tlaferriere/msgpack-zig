@@ -9,7 +9,14 @@ const Repr = enum {
     // Array,
 };
 
+/// Represent your type in msgpack as an extension type.
+/// This is a convenience method to infer the type parameters to
+/// `PackingRepr`.
+/// # An extension type is identified by an i8 type id.
+/// You must provide a callback that takes a byte slice and returns an error
+/// union with your type as payload.
 pub fn PackAsExt(
+    /// Type ID.
     comptime type_id: u8,
     comptime pack: anytype,
     comptime packed_size: anytype,
@@ -66,8 +73,7 @@ pub fn PackingRepr(
 ///
 /// This is a convenience method to infer the type parameters to
 /// `UnpackingRepr`.
-///
-/// An extension type is identified by an i8 type id.
+/// ### An extension type is identified by an i8 type id.
 /// You must provide a callback that takes a byte slice and returns an error
 /// union with your type as payload.
 pub fn UnpackAsExt(
