@@ -49,4 +49,21 @@ pub fn build(b: *std.Build) void {
     const test_step = b.step("test", "Run tests");
     test_step.dependOn(&run_integration_tests.step);
     test_step.dependOn(&run_lib_unit_tests.step);
+
+    // Generate documentation for the module.
+    const lib = b.addSharedLibrary(.{
+        .name = "msgpack",
+        .root_source_file = b.path("src/root.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+
+    const install_docs = b.addInstallDirectory(.{
+        .source_dir = lib.getEmittedDocs(),
+        .install_dir = .prefix,
+        .install_subdir = "docs",
+    });
+
+    const docs_step = b.step("docs", "Copy documentation to prefix path");
+    docs_step.dependOn(&install_docs.step);
 }
