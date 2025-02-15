@@ -298,3 +298,72 @@ test "32-bit length ext round-trip" {
         unpacked,
     );
 }
+
+test "timestamp 32 round-trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const val = msgpack.Timestamp{
+        .seconds = 0xDEADBEEF,
+        .nanoseconds = 0,
+    };
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as(msgpack.Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "timestamp 64 round-trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const val = msgpack.Timestamp{
+        .seconds = 0xDEADBEEF,
+        .nanoseconds = 1,
+    };
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as(msgpack.Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "timestamp 96 round-trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const val = msgpack.Timestamp{
+        .seconds = 0x0EADBEEFDEADBEEF,
+        .nanoseconds = 1,
+    };
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as(msgpack.Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}

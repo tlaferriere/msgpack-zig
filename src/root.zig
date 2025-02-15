@@ -17,16 +17,24 @@ pub const Timestamp = struct {
     /// serialization/deserialization will fail.
     nanoseconds: u29,
 
-    pub const __msgpack_pack_repr__ = repr.PackAsExt(
+    pub const __msgpack_pack_repr__ =
+        repr.PackAsExt(
         -1,
         pack_ext,
         packed_size,
+    );
+
+    pub const __msgpack_unpack_repr__ =
+        repr.UnpackAsExt(
+        -1,
+        unpack_ext,
     );
 
     /// Serialization/deserialization failure.
     pub const Error = error{
         /// Nanoseconds are larger than 999_999_999.
         TooManyNanoseconds,
+        WrongLength,
     };
 
     fn pack_ext(self: Timestamp, alloc: std.mem.Allocator) ![]const u8 {
@@ -100,5 +108,56 @@ pub const Timestamp = struct {
         }
 
         return 12;
+    }
+
+    fn unpack_ext(allocator: std.mem.Allocator, buffer: []const u8) !Timestamp {
+        defer allocator.free(buffer);
+        return switch (buffer.len) {
+            4 => Timestamp{
+                .seconds = @intCast(std.mem.readVarInt(
+                    u32,
+                    buffer,
+                    Endian.big,
+                )),
+                .nanoseconds = 0,
+            },
+            8 => blk: {
+                const data = std.mem.readVarInt(
+                    u64,
+                    buffer,
+                    Endian.big,
+                );
+                const timestamp = Timestamp{
+                    .seconds = @bitCast(data & 0x00000003ffffffff),
+                    .nanoseconds = @intCast(data >> 34),
+                };
+                if (timestamp.nanoseconds > 999_999_999) {
+                    return Error.TooManyNanoseconds;
+                }
+                break :blk timestamp;
+            },
+            12 => blk: {
+                const nanos = std.mem.readVarInt(
+                    u32,
+                    buffer[0..4],
+                    Endian.big,
+                );
+                if (nanos > 999_999_999) {
+                    return Error.TooManyNanoseconds;
+                }
+                const timestamp = Timestamp{
+                    .seconds = std.mem.readVarInt(
+                        i64,
+                        buffer[4..],
+                        Endian.big,
+                    ),
+                    .nanoseconds = @intCast(nanos),
+                };
+                break :blk timestamp;
+            },
+            else => {
+                return Error.WrongLength;
+            },
+        };
     }
 };

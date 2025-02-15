@@ -446,7 +446,7 @@ pub const Unpacker = struct {
     fn unpack_ext(
         self: *Unpacker,
         comptime As: type,
-        comptime type_id: u8,
+        comptime type_id: i8,
         comptime callback: anytype,
     ) !As {
         const metadata = try self.ext_decode();
@@ -462,7 +462,7 @@ pub const Unpacker = struct {
     }
 
     const ExtMetadata = struct {
-        type_id: u8,
+        type_id: i8,
         len: usize,
     };
 
@@ -500,7 +500,7 @@ pub const Unpacker = struct {
             },
             else => return DeserializeError.WrongType,
         };
-        const type_id = self.buffer[self.offset];
+        const type_id: i8 = @bitCast(self.buffer[self.offset]);
         self.offset += 1;
         return ExtMetadata{
             .type_id = type_id,

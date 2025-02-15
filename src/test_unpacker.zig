@@ -6,6 +6,7 @@ const Unpacker = @import("unpacker.zig").Unpacker;
 const DeserializeError = @import("unpacker.zig").DeserializeError;
 const UnpackingRepr = @import("repr.zig").UnpackingRepr;
 const UnpackAsExt = @import("repr.zig").UnpackAsExt;
+const Timestamp = @import("root.zig").Timestamp;
 
 test "Deserialize false" {
     var message = try Unpacker.init(
@@ -683,6 +684,24 @@ test "Deserialize Ext_32 right type" {
     const val = MyType{ .buf = content };
     const unpacked = try message.unpack_as(MyType);
     defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize Timestamp 32" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd6\xFF\xDE\xAD\xBE\xEF",
+        0,
+    );
+
+    const val = Timestamp{
+        .nanoseconds = 0,
+        .seconds = 0xDEADBEEF,
+    };
+    const unpacked = try message.unpack_as(Timestamp);
     try testing.expectEqualDeep(
         val,
         unpacked,
