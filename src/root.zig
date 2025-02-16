@@ -161,3 +161,28 @@ pub const Timestamp = struct {
         };
     }
 };
+
+test Timestamp {
+    const testing = std.testing;
+
+    var packer = try Packer.init(
+        testing.allocator,
+    );
+    const val = Timestamp{
+        .seconds = 0x0EADBEEFDEADBEEF,
+        .nanoseconds = 1,
+    };
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as(Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
