@@ -707,3 +707,39 @@ test "Deserialize Timestamp 32" {
         unpacked,
     );
 }
+
+test "Deserialize Timestamp 64" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xd7\xFF\x00\x00\x00\x04\xDE\xAD\xBE\xEF",
+        0,
+    );
+
+    const val = Timestamp{
+        .nanoseconds = 1,
+        .seconds = 0xDEADBEEF,
+    };
+    const unpacked = try message.unpack_as(Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+test "Deserialize Timestamp 96" {
+    var message = try Unpacker.init(
+        testing.allocator,
+        "\xc7\x0C\xFF\x00\x00\x00\x01\x0E\xAD\xBE\xEF\xDE\xAD\xBE\xEF",
+        0,
+    );
+
+    const val = Timestamp{
+        .nanoseconds = 1,
+        .seconds = 0x0EADBEEFDEADBEEF,
+    };
+    const unpacked = try message.unpack_as(Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
