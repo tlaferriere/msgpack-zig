@@ -1,7 +1,6 @@
 const std = @import("std");
 const marker = @import("marker.zig");
 const Marker = marker.Marker;
-const PackingRepr = @import("repr.zig").PackingRepr;
 const maxInt = std.math.maxInt;
 
 const testing = std.testing;
@@ -602,12 +601,17 @@ fn packed_size(object: anytype) !usize {
         else if (@hasDecl(T, "__msgpack_pack_repr__"))
             struct_packed_size(object)
         else {
-            @compileLog(@typeName(T));
-            @compileLog(T);
-            @compileLog(@typeInfo(T));
-            @compileLog(@typeInfo(T).Struct.fields);
-            @compileLog(@typeInfo(T).Struct.decls);
-            @compileError("Structs not supported yet.");
+            @compileError(std.fmt.comptimePrint(
+                \\I don't know how to serialize your struct {}.
+                \\Please add a `__msgpack_pack_repr__` declaration to your struct with type `msgpack.repr.Pack`:
+                \\Suggested: 
+                \\```
+                \\    const {} = struct {{
+                \\        ...
+                \\        pub const __msgpack_pack_repr__ = msgpack.repr.Pack{{...}};
+                \\    }}
+                \\```
+            , .{ .a = T, .b = T }));
         },
         .Array => |array| if (array.child == u8)
             bin_packed_size(&object)

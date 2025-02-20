@@ -20,7 +20,7 @@ pub fn PackAsExt(
     comptime type_id: i8,
     comptime pack: anytype,
     comptime packed_size: anytype,
-) PackingRepr(
+) Pack(
     @typeInfo(@TypeOf(pack)).Fn.params[0].type.?,
     @typeInfo(
         @typeInfo(@TypeOf(pack)).Fn.return_type.?,
@@ -29,7 +29,7 @@ pub fn PackAsExt(
         @typeInfo(@TypeOf(packed_size)).Fn.return_type.?,
     ).ErrorUnion.error_set,
 ) {
-    return PackingRepr(
+    return Pack(
         @typeInfo(@TypeOf(pack)).Fn.params[0].type.?,
         @typeInfo(
             @typeInfo(@TypeOf(pack)).Fn.return_type.?,
@@ -45,7 +45,7 @@ pub fn PackAsExt(
 }
 
 /// Represent how to pack your type in msgpack.
-pub fn PackingRepr(
+pub fn Pack(
     comptime T: type,
     comptime PackError: type,
     comptime SizeError: type,
@@ -79,7 +79,7 @@ pub fn PackingRepr(
 pub fn UnpackAsExt(
     comptime type_id: i8,
     comptime unpack: anytype,
-) UnpackingRepr(
+) Unpack(
     @typeInfo(
         @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
     ).ErrorUnion.payload,
@@ -87,7 +87,7 @@ pub fn UnpackAsExt(
         @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
     ).ErrorUnion.error_set,
 ) {
-    return UnpackingRepr(
+    return Unpack(
         @typeInfo(
             @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
         ).ErrorUnion.payload,
@@ -101,7 +101,7 @@ pub fn UnpackAsExt(
 }
 
 /// Represent your type in msgpack.
-pub fn UnpackingRepr(comptime T: type, comptime E: ?type) type {
+pub fn Unpack(comptime T: type, comptime E: ?type) type {
     return union(Repr) {
         Ext: Ext,
 

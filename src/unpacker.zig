@@ -128,16 +128,14 @@ pub const Unpacker = struct {
                 if (@hasDecl(As, "__msgpack_unpack_repr__")) {
                     return self.unpack_struct(As);
                 }
-                @compileLog(As);
-                @compileLog(@typeInfo(As).Struct.decls);
                 @compileError(std.fmt.comptimePrint(
                     \\I don't know how to deserialize your struct {}.
-                    \\Please add a `__msgpack_repr__` declaration to your struct with type `msgpack.Repr`:
+                    \\Please add a `__msgpack_pack_repr__` declaration to your struct with type `msgpack.repr.Unpack`:
                     \\Suggested: 
                     \\```
                     \\    const {} = struct {{
                     \\        ...
-                    \\        const __msgpack_repr__ = msgpack.Repr{{...}};
+                    \\        pub const __msgpack_unpack_repr__ = msgpack.repr.Unpack{{...}};
                     \\    }}
                     \\```
                 , .{ .a = As, .b = As }));
