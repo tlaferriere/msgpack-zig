@@ -140,13 +140,13 @@ test "Serialize u128 to uint64" {
     try testing.expectEqualStrings("\xcf\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
 }
 
-test "Serialize error TypeTooLarge" {
+test "Serialize error IntTooLarge" {
     var packer = try Packer.init(
         testing.allocator,
     );
     const val: u128 = 0xFDEADBEEFDEADBEEF;
     try testing.expectError(
-        SerializeError.TypeTooLarge,
+        SerializeError.IntTooLarge,
         packer.pack(val),
     );
 }
@@ -294,7 +294,7 @@ test "Serialize i128 to uint64" {
     );
 }
 
-test "Serialize error TypeTooLarge with int" {
+test "Serialize error IntTooLarge with int" {
     var packer = try Packer.init(
         testing.allocator,
     );
@@ -303,7 +303,7 @@ test "Serialize error TypeTooLarge with int" {
         0xFFFFFFFFFFFFFFF0_DEADBEEFDEADBEEF,
     ));
     try testing.expectError(
-        SerializeError.TypeTooLarge,
+        SerializeError.IntTooLarge,
         packer.pack(val),
     );
 }

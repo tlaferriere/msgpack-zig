@@ -18,7 +18,9 @@ const Repr = enum {
 pub fn PackAsExt(
     /// Type ID.
     comptime type_id: i8,
+    /// Packing callback for your type T. Signature is `pack(T: type, std.mem.Allocator) ![]u8`
     comptime pack: anytype,
+    /// Size callback for your type T. Signature is `packed_size(T: type) !usize`
     comptime packed_size: anytype,
 ) Pack(
     @typeInfo(@TypeOf(pack)).Fn.params[0].type.?,
@@ -37,7 +39,7 @@ pub fn PackAsExt(
         @typeInfo(
             @typeInfo(@TypeOf(packed_size)).Fn.return_type.?,
         ).ErrorUnion.error_set,
-    ){ .Ext = .{
+    ){ .ext = .{
         .type_id = type_id,
         .pack = &pack,
         .packed_size = &packed_size,
@@ -51,7 +53,7 @@ pub fn Pack(
     comptime SizeError: type,
 ) type {
     return union(Repr) {
-        Ext: Ext,
+        ext: Ext,
 
         /// Extension type representation.
         ///
@@ -94,7 +96,7 @@ pub fn UnpackAsExt(
         @typeInfo(
             @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
         ).ErrorUnion.error_set,
-    ){ .Ext = .{
+    ){ .ext = .{
         .type_id = type_id,
         .callback = &unpack,
     } };
@@ -103,10 +105,10 @@ pub fn UnpackAsExt(
 /// Represent your type in msgpack.
 pub fn Unpack(comptime T: type, comptime E: ?type) type {
     return union(Repr) {
-        Ext: Ext,
+        ext: Ext,
 
         /// Extension type representation.
-        pub const Ext = struct {
+        const Ext = struct {
             /// Extension types are identified by a positive i8.
             /// Negative values are reserved for future use.
             type_id: i8,

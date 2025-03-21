@@ -6,10 +6,9 @@ const maxInt = std.math.maxInt;
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
+
 pub const SerializeError = error{
-    TypeTooLarge,
-    WrongType,
-    TypeUnsupported,
+    IntTooLarge,
     StringTooLarge,
     ArrayTooLarge,
     MapTooLarge,
@@ -645,7 +644,7 @@ fn int_packed_size(comptime T: type, value: T) !usize {
     else if (std.math.minInt(i64) <= value and value <= maxInt(u64))
         9
     else
-        SerializeError.TypeTooLarge;
+        SerializeError.IntTooLarge;
 }
 
 fn float_packed_size(comptime T: type) !usize {

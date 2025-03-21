@@ -38,7 +38,7 @@ ZIG_ENV=$(realpath $(dirname ${BASH_SOURCE[0]-$0}))
 echo "ZIG_ENV=$ZIG_ENV"
 export ZIG_ENV
 
-ZIG_VERSION=0.13.0
+ZIG_VERSION=0.14.0
 
 # Check that zig is installed
 if [ ! -f $ZIG_ENV/zig-linux-x86_64-${ZIG_VERSION}/zig ]; then
