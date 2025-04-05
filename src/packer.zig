@@ -1,11 +1,11 @@
 const std = @import("std");
-const marker = @import("marker.zig");
-const Marker = marker.Marker;
 const maxInt = std.math.maxInt;
-
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
+
+const marker = @import("marker.zig");
+const Marker = marker.Marker;
 
 pub const SerializeError = error{
     IntTooLarge,
@@ -102,15 +102,15 @@ pub const Packer = struct {
     fn write(self: *Packer, object: anytype) !void {
         const T = @TypeOf(object);
         return switch (@typeInfo(T)) {
-            .Int => self.write_int(@TypeOf(object), object),
-            .Bool => {
+            .int => self.write_int(@TypeOf(object), object),
+            .bool => {
                 self.buffer[self.offset] = marker.encode(if (object)
                     Marker.True
                 else
                     Marker.False);
                 self.offset += 1;
             },
-            .Optional => {
+            .optional => {
                 if (object == null) {
                     self.buffer[self.offset] = marker.encode(Marker.Nil);
                     self.offset += 1;
@@ -118,10 +118,10 @@ pub const Packer = struct {
                     try self.write(object.?);
                 }
             },
-            .Float => {
+            .float => {
                 try self.write_float(@TypeOf(object), object);
             },
-            .Struct => {
+            .@"struct" => {
                 if (T == BinType) {
                     return self.write_bin(object.str);
                 }
@@ -139,16 +139,16 @@ pub const Packer = struct {
                 }
                 @compileError("Struct not supported yet.");
             },
-            .Array => |array| if (array.child == u8)
+            .array => |array| if (array.child == u8)
                 self.write_string(&object)
             else
                 self.write_array(array.len, object),
-            .Pointer => |pointer| switch (pointer.size) {
-                .One => self.write(object.*),
-                .Slice, .Many => if (pointer.child == u8) {
+            .pointer => |pointer| switch (pointer.size) {
+                .one => self.write(object.*),
+                .slice, .many => if (pointer.child == u8) {
                     try self.write_string(object);
                 } else self.write_array(null, object),
-                .C => {
+                .c => {
                     @compileLog(pointer);
                     @compileError("C sized pointer is not supported.");
                 },
@@ -161,7 +161,7 @@ pub const Packer = struct {
     }
 
     fn write_float(self: *Packer, comptime T: type, value: T) !void {
-        const mark = marker.encode(switch (@typeInfo(T).Float.bits) {
+        const mark = marker.encode(switch (@typeInfo(T).float.bits) {
             32 => .Float_32,
             64 => .Float_64,
             else => unreachable,
@@ -181,9 +181,9 @@ pub const Packer = struct {
 
         const OutType = @Type(
             Type{
-                .Int = Type.Int{
+                .int = Type.Int{
                     .signedness = .unsigned,
-                    .bits = @typeInfo(T).Float.bits,
+                    .bits = @typeInfo(T).float.bits,
                 },
             },
         );
@@ -226,20 +226,20 @@ pub const Packer = struct {
         };
         inline for (byte_counts, markers) |byte_count, mark| {
             const i = @Type(Type{
-                .Int = Type.Int{
+                .int = Type.Int{
                     .signedness = .signed,
                     .bits = byte_count * 8,
                 },
             });
             const u = @Type(Type{
-                .Int = Type.Int{
+                .int = Type.Int{
                     .signedness = .unsigned,
                     .bits = byte_count * 8,
                 },
             });
             if (std.math.minInt(i) <= value and value <= maxInt(u)) {
                 comptime var type_info = @typeInfo(T);
-                type_info.Int.bits = byte_count * 8;
+                type_info.int.bits = byte_count * 8;
                 const OutType = @Type(type_info);
 
                 std.mem.writeInt(
@@ -249,7 +249,7 @@ pub const Packer = struct {
                         self.buffer[self.offset .. self.offset + 1],
                     ),
                     marker.encode(
-                        if (type_info.Int.signedness == .signed and value <= maxInt(OutType))
+                        if (type_info.int.signedness == .signed and value <= maxInt(OutType))
                             mark.signed
                         else
                             mark.unsigned,
@@ -277,16 +277,16 @@ pub const Packer = struct {
         const len = string.len;
         const mark =
             if (len < maxInt(u5))
-            Marker{ .FixStr = @intCast(len) }
-        else if (len <= maxInt(u8))
-            Marker{ .Str_8 = 0 }
-        else if (len <= maxInt(u16))
-            Marker{ .Str_16 = 0 }
-        else if (len <= maxInt(u32))
-            Marker{ .Str_32 = 0 }
-        else {
-            return SerializeError.StringTooLarge;
-        };
+                Marker{ .FixStr = @intCast(len) }
+            else if (len <= maxInt(u8))
+                Marker{ .Str_8 = 0 }
+            else if (len <= maxInt(u16))
+                Marker{ .Str_16 = 0 }
+            else if (len <= maxInt(u32))
+                Marker{ .Str_32 = 0 }
+            else {
+                return SerializeError.StringTooLarge;
+            };
 
         std.mem.writeInt(
             u8,
@@ -305,7 +305,7 @@ pub const Packer = struct {
             Marker.Str_32,
         }, .{ u8, u16, u32 }) |m, OutType| {
             if (m == mark) {
-                const byte_count = @typeInfo(OutType).Int.bits / 8;
+                const byte_count = @typeInfo(OutType).int.bits / 8;
                 std.mem.writeInt(
                     OutType,
                     std.mem.bytesAsValue(
@@ -328,14 +328,14 @@ pub const Packer = struct {
         const len = string.len;
         const mark =
             if (len <= maxInt(u8))
-            Marker{ .Bin_8 = 0 }
-        else if (len <= maxInt(u16))
-            Marker{ .Bin_16 = 0 }
-        else if (len <= maxInt(u32))
-            Marker{ .Bin_32 = 0 }
-        else {
-            return SerializeError.StringTooLarge;
-        };
+                Marker{ .Bin_8 = 0 }
+            else if (len <= maxInt(u16))
+                Marker{ .Bin_16 = 0 }
+            else if (len <= maxInt(u32))
+                Marker{ .Bin_32 = 0 }
+            else {
+                return SerializeError.StringTooLarge;
+            };
 
         std.mem.writeInt(
             u8,
@@ -354,7 +354,7 @@ pub const Packer = struct {
             Marker.Bin_32,
         }, .{ u8, u16, u32 }) |m, OutType| {
             if (m == mark) {
-                const byte_count = @typeInfo(OutType).Int.bits / 8;
+                const byte_count = @typeInfo(OutType).int.bits / 8;
                 std.mem.writeInt(
                     OutType,
                     std.mem.bytesAsValue(
@@ -385,14 +385,14 @@ pub const Packer = struct {
 
         const mark =
             if (len <= maxInt(u4))
-            Marker{ .FixArray = @intCast(len) }
-        else if (len <= maxInt(u16))
-            Marker{ .Array_16 = 0 }
-        else if (len <= maxInt(u32))
-            Marker{ .Array_32 = 0 }
-        else {
-            return SerializeError.ArrayTooLarge;
-        };
+                Marker{ .FixArray = @intCast(len) }
+            else if (len <= maxInt(u16))
+                Marker{ .Array_16 = 0 }
+            else if (len <= maxInt(u32))
+                Marker{ .Array_32 = 0 }
+            else {
+                return SerializeError.ArrayTooLarge;
+            };
 
         std.mem.writeInt(
             u8,
@@ -442,14 +442,14 @@ pub const Packer = struct {
         const count = map.count();
         const mark =
             if (count <= maxInt(u4))
-            Marker{ .FixMap = @intCast(count) }
-        else if (count <= maxInt(u16))
-            Marker{ .Map_16 = 0 }
-        else if (count <= maxInt(u32))
-            Marker{ .Map_32 = 0 }
-        else {
-            return SerializeError.MapTooLarge;
-        };
+                Marker{ .FixMap = @intCast(count) }
+            else if (count <= maxInt(u16))
+                Marker{ .Map_16 = 0 }
+            else if (count <= maxInt(u32))
+                Marker{ .Map_32 = 0 }
+            else {
+                return SerializeError.MapTooLarge;
+            };
 
         std.mem.writeInt(
             u8,
@@ -499,7 +499,7 @@ pub const Packer = struct {
 
     fn write_struct(self: *Packer, object: anytype) !void {
         switch (@TypeOf(object).__msgpack_pack_repr__) {
-            .Ext => |ext| try self.write_ext(object, ext),
+            .ext => |ext| try self.write_ext(object, ext),
         }
     }
 
@@ -507,22 +507,22 @@ pub const Packer = struct {
         const size = try ext.packed_size(object);
         const mark =
             switch (size) {
-            1 => Marker{ .FixExt_1 = 0 },
-            2 => Marker{ .FixExt_2 = 0 },
-            4 => Marker{ .FixExt_4 = 0 },
-            8 => Marker{ .FixExt_8 = 0 },
-            16 => Marker{ .FixExt_16 = 0 },
-            3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
-            maxInt(u8) + 1...maxInt(u16) => Marker{
-                .Ext_16 = 0,
-            },
-            maxInt(u16) + 1...maxInt(u32) => Marker{
-                .Ext_32 = 0,
-            },
-            else => {
-                unreachable;
-            },
-        };
+                1 => Marker{ .FixExt_1 = 0 },
+                2 => Marker{ .FixExt_2 = 0 },
+                4 => Marker{ .FixExt_4 = 0 },
+                8 => Marker{ .FixExt_8 = 0 },
+                16 => Marker{ .FixExt_16 = 0 },
+                3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
+                maxInt(u8) + 1...maxInt(u16) => Marker{
+                    .Ext_16 = 0,
+                },
+                maxInt(u16) + 1...maxInt(u32) => Marker{
+                    .Ext_32 = 0,
+                },
+                else => {
+                    unreachable;
+                },
+            };
 
         self.buffer[self.offset] = marker.encode(mark);
         self.offset += 1;
@@ -581,14 +581,14 @@ pub const Packer = struct {
 fn packed_size(object: anytype) !usize {
     const T = @TypeOf(object);
     return switch (@typeInfo(T)) {
-        .Int => try int_packed_size(@TypeOf(object), object),
-        .Bool => 1,
-        .Optional => if (object == null)
+        .int => try int_packed_size(@TypeOf(object), object),
+        .bool => 1,
+        .optional => if (object == null)
             1
         else
             packed_size(object.?),
-        .Float => float_packed_size(@TypeOf(object)),
-        .Struct => if (T == BinType)
+        .float => float_packed_size(@TypeOf(object)),
+        .@"struct" => if (T == BinType)
             bin_packed_size(object.str)
         else if (@hasDecl(T, "iterator") and
             @hasDecl(T, "Iterator") and
@@ -603,7 +603,7 @@ fn packed_size(object: anytype) !usize {
             @compileError(std.fmt.comptimePrint(
                 \\I don't know how to serialize your struct {}.
                 \\Please add a `__msgpack_pack_repr__` declaration to your struct with type `msgpack.repr.Pack`:
-                \\Suggested: 
+                \\Suggested:
                 \\```
                 \\    const {} = struct {{
                 \\        ...
@@ -612,18 +612,18 @@ fn packed_size(object: anytype) !usize {
                 \\```
             , .{ .a = T, .b = T }));
         },
-        .Array => |array| if (array.child == u8)
+        .array => |array| if (array.child == u8)
             bin_packed_size(&object)
         else
             array_packed_size(array.len, object),
-        .Pointer => |pointer| switch (pointer.size) {
-            .One => if (@typeInfo(pointer.child) == .Array and
-                @typeInfo(pointer.child).Array.child == u8)
+        .pointer => |pointer| switch (pointer.size) {
+            .one => if (@typeInfo(pointer.child) == .array and
+                @typeInfo(pointer.child).array.child == u8)
                 string_packed_size(object)
             else
                 packed_size(object.*),
-            .Slice, .Many => array_packed_size(null, object),
-            .C => @compileError("C sized pointer."),
+            .slice, .many => array_packed_size(null, object),
+            .c => @compileError("C sized pointer."),
         },
         else => {
             @compileLog(T);
@@ -648,7 +648,7 @@ fn int_packed_size(comptime T: type, value: T) !usize {
 }
 
 fn float_packed_size(comptime T: type) !usize {
-    return switch (@typeInfo(T).Float.bits) {
+    return switch (@typeInfo(T).float.bits) {
         32 => 5,
         64 => 9,
         else => @compileError(std.fmt.comptimePrint(
@@ -720,7 +720,7 @@ fn map_packed_size(map: anytype) !usize {
 
 fn struct_packed_size(object: anytype) !usize {
     switch (@TypeOf(object).__msgpack_pack_repr__) {
-        .Ext => |ext| {
+        .ext => |ext| {
             const size = try ext.packed_size(object);
             const marker_overhead_bytes = 2;
             const length_overhead_bytes: usize = switch (size) {

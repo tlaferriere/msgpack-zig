@@ -1,11 +1,10 @@
 const std = @import("std");
-
-const marker = @import("marker.zig");
-const Marker = marker.Marker;
-
 const testing = std.testing;
 const Endian = std.builtin.Endian;
 const Type = std.builtin.Type;
+
+const marker = @import("marker.zig");
+const Marker = marker.Marker;
 
 /// Deserialization Errors
 pub const DeserializeError = error{
@@ -82,8 +81,8 @@ pub const Unpacker = struct {
     /// responsibility to free the memory once you are done with it.
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
-            .Int => |int| self.unpack_int(int, As),
-            .Bool => switch (try marker.decode(self.buffer[self.offset])) {
+            .int => |int| self.unpack_int(int, As),
+            .bool => switch (try marker.decode(self.buffer[self.offset])) {
                 .False => {
                     self.offset += 1;
                     return false;
@@ -94,33 +93,33 @@ pub const Unpacker = struct {
                 },
                 else => DeserializeError.WrongType,
             },
-            .Optional => |optional| switch (try marker.decode(self.buffer[self.offset])) {
+            .optional => |optional| switch (try marker.decode(self.buffer[self.offset])) {
                 .Nil => {
                     self.offset += 1;
                     return null;
                 },
                 else => try self.unpack_as(optional.child),
             },
-            .Float => |float| self.unpack_float(float, As),
-            .Pointer => |pointer| switch (pointer.size) {
-                .One => if (pointer.child == .Array) {
+            .float => |float| self.unpack_float(float, As),
+            .pointer => |pointer| switch (pointer.size) {
+                .one => if (pointer.child == .Array) {
                     return self.unpack_array(pointer.child.Array.len, As);
                 } else {
                     @compileError("Can't serialize objects behind pointers yet.");
                 },
-                .Slice, .Many => if (pointer.child == u8) {
+                .slice, .many => if (pointer.child == u8) {
                     return self.unpack_string(As);
                 } else {
                     return self.unpack_array(null, As);
                 },
-                .C => @compileError("C sized pointer."),
+                .c => @compileError("C sized pointer."),
             },
-            .Array => |array| self.unpack_array(array.len, As),
-            .Struct => {
+            .array => |array| self.unpack_array(array.len, As),
+            .@"struct" => {
                 if (@hasDecl(As, "put") and
                     ((@hasDecl(As, "init") and
-                    @typeInfo(@TypeOf(As.put)).Fn.params.len == 3) or
-                    @typeInfo(@TypeOf(As.put)).Fn.params.len == 4) and
+                        @typeInfo(@TypeOf(As.put)).@"fn".params.len == 3) or
+                        @typeInfo(@TypeOf(As.put)).@"fn".params.len == 4) and
                     @hasDecl(As, "KV"))
                 {
                     return self.unpack_map(As);
@@ -131,7 +130,7 @@ pub const Unpacker = struct {
                 @compileError(std.fmt.comptimePrint(
                     \\I don't know how to deserialize your struct {}.
                     \\Please add a `__msgpack_pack_repr__` declaration to your struct with type `msgpack.repr.Unpack`:
-                    \\Suggested: 
+                    \\Suggested:
                     \\```
                     \\    const {} = struct {{
                     \\        ...
@@ -349,7 +348,7 @@ pub const Unpacker = struct {
                 } else {
                     // if (info == .Pointer) {
                     // @compileLog("FixArray to unknown size size array: ", info);
-                    array = try self.allocator.alloc(info.Pointer.child, len);
+                    array = try self.allocator.alloc(info.pointer.child, len);
                     // }
                 }
                 self.offset += 1;
@@ -365,7 +364,7 @@ pub const Unpacker = struct {
                 } else {
                     // if (info == .Pointer) {
                     // @compileLog("FixArray to unknown size size array: ", info);
-                    array = try self.allocator.alloc(info.Pointer.child, len);
+                    array = try self.allocator.alloc(info.pointer.child, len);
                     // }
                 }
                 self.offset += 3;
@@ -381,14 +380,14 @@ pub const Unpacker = struct {
                 } else {
                     // if (info == .Pointer) {
                     // @compileLog("FixArray to unknown size size array: ", info);
-                    array = try self.allocator.alloc(info.Pointer.child, len);
+                    array = try self.allocator.alloc(info.pointer.child, len);
                     // }
                 }
                 self.offset += 5;
             },
             else => return DeserializeError.WrongType,
         }
-        for (if (info == .Array) &array else array) |*element| {
+        for (if (info == .array) &array else array) |*element| {
             element.* = try self.unpack_as(@TypeOf(element.*));
         }
         return array;
@@ -433,7 +432,7 @@ pub const Unpacker = struct {
 
     fn unpack_struct(self: *Unpacker, comptime As: type) !As {
         return switch (As.__msgpack_unpack_repr__) {
-            .Ext => |ext| self.unpack_ext(
+            .ext => |ext| self.unpack_ext(
                 As,
                 ext.type_id,
                 ext.callback,

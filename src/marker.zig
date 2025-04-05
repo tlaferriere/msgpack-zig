@@ -1,9 +1,9 @@
-const Type = @import("std").builtin.Type;
-const Signedness = @import("std").builtin.Signedness;
-const meta = @import("std").meta;
-const math = @import("std").math;
-const testing = @import("std").testing;
 const debug = @import("std").debug;
+const math = @import("std").math;
+const meta = @import("std").meta;
+const Signedness = @import("std").builtin.Signedness;
+const testing = @import("std").testing;
+const Type = @import("std").builtin.Type;
 
 const MarkerMask = struct { marker: u8, mask: u8 = 0xFF };
 pub const MarkerMasks = struct {
@@ -134,13 +134,13 @@ pub const MarkerMasks = struct {
 
 pub const Marker = init: {
     // Generate the Marker Union from the
-    const markers = @typeInfo(MarkerMasks).Struct.decls;
+    const markers = @typeInfo(MarkerMasks).@"struct".decls;
     var union_fields: [markers.len]Type.UnionField = undefined;
     var enum_fields: [markers.len]Type.EnumField = undefined;
     for (&union_fields, &enum_fields, markers) |*union_field, *enum_field, marker| {
         const mask = @field(MarkerMasks, marker.name).mask;
         const field_type = @Type(Type{
-            .Int = .{
+            .int = .{
                 // Take the bits left in the byte as the value.
                 .bits = if (mask != 0xFF) math.log2_int_ceil(u16, ~mask) else 0,
                 .signedness = Signedness.unsigned,
@@ -156,9 +156,9 @@ pub const Marker = init: {
             .alignment = 1,
         };
     }
-    break :init @Type(Type{ .Union = .{
+    break :init @Type(Type{ .@"union" = .{
         .tag_type = @Type(Type{
-            .Enum = .{
+            .@"enum" = .{
                 .fields = &enum_fields,
                 .decls = &.{},
                 .tag_type = u8,
@@ -174,7 +174,7 @@ pub const Marker = init: {
 pub const MarkerDecodeError = error{NotAMarker};
 
 pub fn decode(byte: u8) MarkerDecodeError!Marker {
-    inline for (@typeInfo(MarkerMasks).Struct.decls) |field| {
+    inline for (@typeInfo(MarkerMasks).@"struct".decls) |field| {
         const field_value = @field(MarkerMasks, field.name);
         if (byte & field_value.mask == field_value.marker) {
             return @unionInit(
@@ -190,7 +190,7 @@ pub fn decode(byte: u8) MarkerDecodeError!Marker {
 pub const MarkerEncodeError = error{NotAMarker};
 
 pub fn encode(marker: Marker) u8 {
-    inline for (@typeInfo(Marker).Union.fields) |field| {
+    inline for (@typeInfo(Marker).@"union".fields) |field| {
         if (marker == @field(Marker, field.name)) {
             const marker_mask: MarkerMask = @field(MarkerMasks, field.name);
             return (marker_mask.marker & marker_mask.mask) |

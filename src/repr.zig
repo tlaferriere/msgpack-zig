@@ -4,7 +4,7 @@ const std = @import("std");
 const Repr = enum {
     // Int,
     /// Extension type.
-    Ext,
+    ext,
     // Map,
     // Array,
 };
@@ -23,22 +23,22 @@ pub fn PackAsExt(
     /// Size callback for your type T. Signature is `packed_size(T: type) !usize`
     comptime packed_size: anytype,
 ) Pack(
-    @typeInfo(@TypeOf(pack)).Fn.params[0].type.?,
+    @typeInfo(@TypeOf(pack)).@"fn".params[0].type.?,
     @typeInfo(
-        @typeInfo(@TypeOf(pack)).Fn.return_type.?,
-    ).ErrorUnion.error_set,
+        @typeInfo(@TypeOf(pack)).@"fn".return_type.?,
+    ).error_union.error_set,
     @typeInfo(
-        @typeInfo(@TypeOf(packed_size)).Fn.return_type.?,
-    ).ErrorUnion.error_set,
+        @typeInfo(@TypeOf(packed_size)).@"fn".return_type.?,
+    ).error_union.error_set,
 ) {
     return Pack(
-        @typeInfo(@TypeOf(pack)).Fn.params[0].type.?,
+        @typeInfo(@TypeOf(pack)).@"fn".params[0].type.?,
         @typeInfo(
-            @typeInfo(@TypeOf(pack)).Fn.return_type.?,
-        ).ErrorUnion.error_set,
+            @typeInfo(@TypeOf(pack)).@"fn".return_type.?,
+        ).error_union.error_set,
         @typeInfo(
-            @typeInfo(@TypeOf(packed_size)).Fn.return_type.?,
-        ).ErrorUnion.error_set,
+            @typeInfo(@TypeOf(packed_size)).@"fn".return_type.?,
+        ).error_union.error_set,
     ){ .ext = .{
         .type_id = type_id,
         .pack = &pack,
@@ -83,19 +83,19 @@ pub fn UnpackAsExt(
     comptime unpack: anytype,
 ) Unpack(
     @typeInfo(
-        @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
-    ).ErrorUnion.payload,
+        @typeInfo(@TypeOf(unpack)).@"fn".return_type.?,
+    ).error_union.payload,
     @typeInfo(
-        @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
-    ).ErrorUnion.error_set,
+        @typeInfo(@TypeOf(unpack)).@"fn".return_type.?,
+    ).error_union.error_set,
 ) {
     return Unpack(
         @typeInfo(
-            @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
-        ).ErrorUnion.payload,
+            @typeInfo(@TypeOf(unpack)).@"fn".return_type.?,
+        ).error_union.payload,
         @typeInfo(
-            @typeInfo(@TypeOf(unpack)).Fn.return_type.?,
-        ).ErrorUnion.error_set,
+            @typeInfo(@TypeOf(unpack)).@"fn".return_type.?,
+        ).error_union.error_set,
     ){ .ext = .{
         .type_id = type_id,
         .callback = &unpack,
