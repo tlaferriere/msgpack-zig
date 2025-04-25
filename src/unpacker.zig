@@ -141,8 +141,6 @@ pub const Unpacker = struct {
                 , .{ .a = As, .b = As }));
             },
             else => {
-                @compileLog(As);
-                @compileLog(@typeInfo(As));
                 @compileError("Msgpack cannot serialize this type.");
             },
         };

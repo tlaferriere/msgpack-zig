@@ -1,6 +1,5 @@
 const std = @import("std");
 
-/// Represent your type in msgpack.
 const Repr = enum {
     // Int,
     /// Extension type.
@@ -10,9 +9,10 @@ const Repr = enum {
 };
 
 /// Represent your type in msgpack as an extension type.
+///
 /// This is a convenience method to infer the type parameters to
-/// `PackingRepr`.
-/// # An extension type is identified by an i8 type id.
+/// `Pack`.
+/// *An extension type is identified by an i8 type id.*
 /// You must provide a callback that takes a byte slice and returns an error
 /// union with your type as payload.
 pub fn PackAsExt(
@@ -55,7 +55,7 @@ pub fn Pack(
 
         /// Extension type representation.
         ///
-        /// Extension types are identified by a u8.
+        /// *An extension type is identified by an i8 type id.*
         /// You must provide callbacks to pack and/or unpack your type to and
         /// from msgpack.
         pub const Ext = struct {
@@ -73,7 +73,7 @@ pub fn Pack(
 ///
 /// This is a convenience method to infer the type parameters to
 /// `UnpackingRepr`.
-/// ### An extension type is identified by an i8 type id.
+/// *An extension type is identified by an i8 type id.*
 /// You must provide a callback that takes a byte slice and returns an error
 /// union with your type as payload.
 pub fn UnpackAsExt(
@@ -100,7 +100,7 @@ pub fn UnpackAsExt(
     } };
 }
 
-/// Represent your type in msgpack.
+/// Represent how to unpack your type in msgpack.
 pub fn Unpack(comptime T: type, comptime E: ?type) type {
     return union(Repr) {
         Ext: Ext,

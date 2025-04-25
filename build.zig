@@ -51,7 +51,7 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
 
     // Generate documentation for the module.
-    const lib = b.addSharedLibrary(.{
+    const lib = b.addObject(.{
         .name = "msgpack",
         .root_source_file = b.path("src/root.zig"),
         .target = target,
