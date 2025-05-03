@@ -134,7 +134,7 @@ pub const Packer = struct {
                 {
                     return self.write_map(object);
                 }
-                if (@hasDecl(T, "__msgpack_pack_repr__")) {
+                if (@hasDecl(T, "__msgpack__")) {
                     return self.write_struct(object);
                 }
                 @compileError("Struct not supported yet.");
@@ -498,13 +498,75 @@ pub const Packer = struct {
     }
 
     fn write_struct(self: *Packer, object: anytype) !void {
-        switch (@TypeOf(object).__msgpack_pack_repr__) {
+        switch (@TypeOf(object).__msgpack__.repr) {
             .ext => |ext| try self.write_ext(object, ext),
+            .map => try self.write_struct_as_map(object),
         }
     }
 
-    fn write_ext(self: *Packer, object: anytype, ext: anytype) !void {
-        const size = try ext.packed_size(object);
+    fn write_struct_as_map(self: *Packer, object: anytype) !void {
+        const fields = @typeInfo(@TypeOf(object)).@"struct".fields;
+        const count = fields.len;
+
+        const mark =
+            if (count <= maxInt(u4))
+                Marker{ .FixMap = @intCast(count) }
+            else if (count <= maxInt(u16))
+                Marker{ .Map_16 = 0 }
+            else if (count <= maxInt(u32))
+                Marker{ .Map_32 = 0 }
+            else {
+                return SerializeError.MapTooLarge;
+            };
+
+        std.mem.writeInt(
+            u8,
+            std.mem.bytesAsValue(
+                [1]u8,
+                self.buffer[self.offset .. self.offset + 1],
+            ),
+            marker.encode(mark),
+            Endian.big,
+        );
+        self.offset += 1;
+
+        switch (mark) {
+            .FixMap => {},
+            .Map_16 => {
+                std.mem.writeInt(
+                    u16,
+                    std.mem.bytesAsValue(
+                        [2]u8,
+                        self.buffer[self.offset .. self.offset + 2],
+                    ),
+                    @intCast(count),
+                    Endian.big,
+                );
+                self.offset += 2;
+            },
+            .Map_32 => {
+                std.mem.writeInt(
+                    u32,
+                    std.mem.bytesAsValue(
+                        [4]u8,
+                        self.buffer[self.offset .. self.offset + 4],
+                    ),
+                    @intCast(count),
+                    Endian.big,
+                );
+                self.offset += 4;
+            },
+            else => unreachable,
+        }
+
+        inline for (fields) |field| {
+            try self.write(field.name);
+            try self.write(@field(object, field.name));
+        }
+    }
+
+    fn write_ext(self: *Packer, object: anytype, ext: i8) !void {
+        const size = try @TypeOf(object).__msgpack__.packed_size(object);
         const mark =
             switch (size) {
                 1 => Marker{ .FixExt_1 = 0 },
@@ -565,10 +627,10 @@ pub const Packer = struct {
             else => unreachable,
         }
 
-        self.buffer[self.offset] = @bitCast(ext.type_id);
+        self.buffer[self.offset] = @bitCast(ext);
         self.offset += 1;
 
-        const custom_buffer = try ext.pack(object, self.allocator);
+        const custom_buffer = try @TypeOf(object).__msgpack__.pack_ext(object, self.allocator);
         defer self.allocator.free(custom_buffer);
         @memcpy(
             self.buffer[self.offset .. self.offset + size],
@@ -597,19 +659,24 @@ fn packed_size(object: anytype) !usize {
             @hasField(T.Entry, "value_ptr") and
             @hasDecl(T, "count"))
             map_packed_size(object)
-        else if (@hasDecl(T, "__msgpack_pack_repr__"))
+        else if (@hasDecl(T, "__msgpack__"))
             struct_packed_size(object)
         else {
             @compileError(std.fmt.comptimePrint(
                 \\I don't know how to serialize your struct {}.
-                \\Please add a `__msgpack_pack_repr__` declaration to your struct with type `msgpack.repr.Pack`:
+                \\Please add a `__msgpack__` declaration to your struct with type `msgpack.Repr`:
                 \\Suggested:
                 \\```
                 \\    const {} = struct {{
                 \\        ...
-                \\        pub const __msgpack_pack_repr__ = msgpack.repr.Pack{{...}};
+                \\        pub const __msgpack__ = {{
+                \\            pub const repr = msgpack.Repr{{ .ext = type_id }};
+                \\            pub fn pack_ext(self: Self, alloc: std.mem.Allocator) ![]const u8 {{...}}
+                \\            pub fn packed_size(self: Self) !usize {{...}}
+                \\        }}
                 \\    }}
                 \\```
+                \\Note: For ext types, pack_ext and packed_size must be marked pub.
             , .{ .a = T, .b = T }));
         },
         .array => |array| if (array.child == u8)
@@ -719,9 +786,9 @@ fn map_packed_size(map: anytype) !usize {
 }
 
 fn struct_packed_size(object: anytype) !usize {
-    switch (@TypeOf(object).__msgpack_pack_repr__) {
-        .ext => |ext| {
-            const size = try ext.packed_size(object);
+    switch (@TypeOf(object).__msgpack__.repr) {
+        .ext => {
+            const size = try @TypeOf(object).__msgpack__.packed_size(object);
             const marker_overhead_bytes = 2;
             const length_overhead_bytes: usize = switch (size) {
                 1, 2, 4, 8, 16 => 0,
@@ -731,6 +798,23 @@ fn struct_packed_size(object: anytype) !usize {
                 else => return SerializeError.ExtTooLarge,
             };
             return marker_overhead_bytes + length_overhead_bytes + size;
+        },
+        .map => {
+            const fields = @typeInfo(@TypeOf(object)).@"struct".fields;
+            const count = fields.len;
+            var packed_len: usize = if (count <= maxInt(u4))
+                1
+            else if (count <= maxInt(u16))
+                3
+            else if (count <= maxInt(u32))
+                5
+            else
+                return SerializeError.MapTooLarge;
+            inline for (fields) |field| {
+                packed_len += try packed_size(field.name);
+                packed_len += try packed_size(@field(object, field.name));
+            }
+            return packed_len;
         },
         // else => {
         //     @compileLog(@TypeOf(object).__msgpack_pack_repr__);

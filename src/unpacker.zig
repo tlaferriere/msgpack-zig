@@ -13,6 +13,7 @@ pub const DeserializeError = error{
     Finished,
     WrongArrayLength,
     WrongExtType,
+    WrongFields,
 };
 
 /// Msgpack unpacker.
@@ -116,6 +117,9 @@ pub const Unpacker = struct {
             },
             .array => |array| self.unpack_array(array.len, As),
             .@"struct" => {
+                if (@hasDecl(As, "__msgpack__")) {
+                    return self.unpack_struct(As);
+                }
                 if (@hasDecl(As, "put") and
                     ((@hasDecl(As, "init") and
                         @typeInfo(@TypeOf(As.put)).@"fn".params.len == 3) or
@@ -124,17 +128,16 @@ pub const Unpacker = struct {
                 {
                     return self.unpack_map(As);
                 }
-                if (@hasDecl(As, "__msgpack_unpack_repr__")) {
-                    return self.unpack_struct(As);
-                }
                 @compileError(std.fmt.comptimePrint(
                     \\I don't know how to deserialize your struct {}.
-                    \\Please add a `__msgpack_pack_repr__` declaration to your struct with type `msgpack.repr.Unpack`:
+                    \\Please add a `__msgpack__` declaration to your struct with type `msgpack.Repr`:
                     \\Suggested:
                     \\```
                     \\    const {} = struct {{
                     \\        ...
-                    \\        pub const __msgpack_unpack_repr__ = msgpack.repr.Unpack{{...}};
+                    \\        pub const __msgpack__ = struct {
+                    \\            pub const repr = msgpack.Repr.map
+                    \\        };
                     \\    }}
                     \\```
                 , .{ .a = As, .b = As }));
@@ -431,13 +434,102 @@ pub const Unpacker = struct {
     }
 
     fn unpack_struct(self: *Unpacker, comptime As: type) !As {
-        return switch (As.__msgpack_unpack_repr__) {
-            .ext => |ext| self.unpack_ext(
-                As,
-                ext.type_id,
-                ext.callback,
-            ),
+        const msgpack_decl = As.__msgpack__;
+        if (!@hasDecl(msgpack_decl, "repr")) {
+            @compileError(std.fmt.comptimePrint(
+                \\Missing the repr declaration in your `__msgpack__` declaration.
+                \\Please add a `repr` declaration to your `__msgpack__` struct with type `msgpack.Repr`:
+                \\Suggested:
+                \\```
+                \\    const {} = struct {{
+                \\        ...
+                \\        pub const __msgpack__ = struct {{
+                \\            pub const repr = msgpack.Repr.map
+                \\        }};
+                \\    }}
+                \\```
+            , .{ .a = As }));
+        }
+        return switch (msgpack_decl.repr) {
+            .ext => |ext| blk: {
+                if (!@hasDecl(msgpack_decl, "unpack_ext")) {
+                    @compileError(std.fmt.comptimePrint(
+                        \\Missing the unpack_ext function in your `__msgpack__` declaration.
+                        \\Please add an unpack_ext function to your `__msgpack__` struct:
+                        \\Suggested:
+                        \\```
+                        \\    const {} = struct {{
+                        \\        ...
+                        \\        pub const __msgpack__ = struct {{
+                        \\            pub const repr = msgpack.Repr{{ .ext = type_id }};
+                        \\            pub fn unpack_ext(alloc: std.mem.Allocator, buf: []u8) !{} {{...}}
+                        \\        }};
+                        \\    }}
+                        \\```
+                        \\Note: unpack_ext must be marked pub.
+                    , .{ .a = As, .b = As }));
+                }
+                break :blk self.unpack_ext(
+                    As,
+                    ext,
+                    msgpack_decl.unpack_ext,
+                );
+            },
+            .map => unpack_map_as_struct(self, As),
         };
+    }
+
+    fn unpack_map_as_struct(self: *Unpacker, comptime As: type) !As {
+        const len = switch (try marker.decode(self.buffer[self.offset])) {
+            .FixMap => |len| blk: {
+                self.offset += 1;
+                break :blk len;
+            },
+            .Map_16 => blk: {
+                const len = std.mem.readVarInt(
+                    u16,
+                    self.buffer[self.offset + 1 .. self.offset + 3],
+                    Endian.big,
+                );
+                self.offset += 3;
+                break :blk len;
+            },
+            .Map_32 => blk: {
+                const len = std.mem.readVarInt(
+                    u32,
+                    self.buffer[self.offset + 1 .. self.offset + 5],
+                    Endian.big,
+                );
+                self.offset += 5;
+                break :blk len;
+            },
+            else => return DeserializeError.WrongType,
+        };
+        const fields = @typeInfo(As).@"struct".fields;
+        if (len != fields.len) {
+            return DeserializeError.WrongFields;
+        }
+        var fields_to_fill = std.BufSet.init(self.allocator);
+        defer fields_to_fill.deinit();
+        inline for (fields) |field| {
+            try fields_to_fill.insert(field.name);
+        }
+        var out = std.mem.zeroes(As);
+        for (0..len) |_| {
+            const key = try self.unpack_as([]const u8);
+            defer self.allocator.free(key);
+            if (!fields_to_fill.contains(key)) {
+                return DeserializeError.WrongFields;
+            }
+            fields_to_fill.remove(key);
+            inline for (fields) |field| {
+                if (std.mem.eql(u8, key, field.name)) {
+                    @field(out, field.name) = try self.unpack_as(field.type);
+                    break;
+                }
+            }
+        }
+        return out;
     }
 
     fn unpack_ext(

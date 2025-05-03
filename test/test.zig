@@ -1,8 +1,8 @@
 //! Integration tests for the msgpack module.
-const msgpack = @import("msgpack");
 const std = @import("std");
-
 const testing = std.testing;
+
+const msgpack = @import("msgpack");
 
 test "u7 round-trip" {
     var packer_ = try msgpack.Packer.init(
@@ -240,40 +240,32 @@ const MySizeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
-    pub const __msgpack_pack_repr__ =
-        msgpack.repr.PackAsExt(
-        0x71,
-        pack_ext,
-        packed_size,
-    );
+    pub const __msgpack__ = struct {
+        pub const repr = msgpack.Repr{ .ext = 0x71 };
 
-    fn pack_ext(
-        self: MyType,
-        allocator: std.mem.Allocator,
-    ) ![]const u8 {
-        const out = try allocator.alloc(u8, self.buf.len);
-        @memcpy(out, self.buf);
-        return out;
-    }
-
-    fn packed_size(self: MyType) !usize {
-        return self.buf.len;
-    }
-
-    pub const __msgpack_unpack_repr__ = msgpack.repr.UnpackAsExt(
-        0x71,
-        unpack_ext,
-    );
-
-    fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
-        errdefer allocator.free(data);
-        for (data) |b| {
-            if (b == 0xFF) {
-                return MyDeserializeError.OhNo;
-            }
+        pub fn pack_ext(
+            self: MyType,
+            allocator: std.mem.Allocator,
+        ) ![]const u8 {
+            const out = try allocator.alloc(u8, self.buf.len);
+            @memcpy(out, self.buf);
+            return out;
         }
-        return MyType{ .buf = data };
-    }
+
+        pub fn packed_size(self: MyType) !usize {
+            return self.buf.len;
+        }
+
+        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+            errdefer allocator.free(data);
+            for (data) |b| {
+                if (b == 0xFF) {
+                    return MyDeserializeError.OhNo;
+                }
+            }
+            return MyType{ .buf = data };
+        }
+    };
 };
 
 test "32-bit length ext round-trip" {
@@ -339,6 +331,40 @@ test "timestamp 64 round-trip" {
         0,
     );
     const unpacked = try message.unpack_as(msgpack.Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+const MyStruct = struct {
+    a: u32,
+    b: []const u8,
+    @"1 2 3 weird $name": u8,
+    pub const __msgpack__ = struct {
+        pub const repr = msgpack.Repr.map;
+    };
+};
+
+test "object as map round-trip" {
+    var packer = try msgpack.Packer.init(
+        testing.allocator,
+    );
+    const val = MyStruct{
+        .@"1 2 3 weird $name" = 2,
+        .a = 0xDEADBEEF,
+        .b = "Hello!",
+    };
+    try packer.pack(val);
+    const buffer = packer.finish();
+    defer testing.allocator.free(buffer);
+    var message = try msgpack.Unpacker.init(
+        testing.allocator,
+        buffer,
+        0,
+    );
+    const unpacked = try message.unpack_as(MyStruct);
+    defer testing.allocator.free(unpacked.b);
     try testing.expectEqualDeep(
         val,
         unpacked,

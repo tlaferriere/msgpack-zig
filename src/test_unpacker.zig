@@ -1,12 +1,11 @@
 const std = @import("std");
-const builtin = @import("builtin");
 const testing = std.testing;
+const builtin = @import("builtin");
 
-const Unpacker = @import("unpacker.zig").Unpacker;
 const DeserializeError = @import("unpacker.zig").DeserializeError;
-const UnpackingRepr = @import("repr.zig").UnpackingRepr;
-const UnpackAsExt = @import("repr.zig").UnpackAsExt;
+const Repr = @import("root.zig").Repr;
 const Timestamp = @import("root.zig").Timestamp;
+const Unpacker = @import("unpacker.zig").Unpacker;
 
 test "Deserialize false" {
     var message = try Unpacker.init(
@@ -510,13 +509,9 @@ const MyDeserializeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
-    pub const __msgpack_unpack_repr__ = UnpackAsExt(
-        0x71,
-        msgpack.unpack_ext,
-    );
-
-    const msgpack = struct {
-        fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x71 };
+        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
             errdefer allocator.free(data);
             for (data) |b| {
                 if (b == 0xFF) {

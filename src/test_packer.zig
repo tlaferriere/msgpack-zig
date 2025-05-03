@@ -1,12 +1,11 @@
-const Packer = @import("packer.zig").Packer;
-const SerializeError = @import("packer.zig").SerializeError;
-const Bin = @import("packer.zig").Bin;
-const PackingRepr = @import("repr.zig").PackingRepr;
-const repr = @import("repr.zig");
-const Timestamp = @import("root.zig").Timestamp;
-
 const std = @import("std");
 const testing = std.testing;
+
+const Bin = @import("packer.zig").Bin;
+const Packer = @import("packer.zig").Packer;
+const Repr = @import("root.zig").Repr;
+const SerializeError = @import("packer.zig").SerializeError;
+const Timestamp = @import("root.zig").Timestamp;
 
 test "Serialize u7 to 7-bit positive fixint" {
     var packer = try Packer.init(
@@ -629,15 +628,11 @@ const MySizeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
-    pub const __msgpack_pack_repr__ =
-        repr.PackAsExt(
-        0x71,
-        msgpack.pack_ext,
-        msgpack.packed_size,
-    );
+    pub const __msgpack__ = struct {
+        pub const repr =
+            Repr{ .ext = 0x71 };
 
-    const msgpack = struct {
-        fn pack_ext(
+        pub fn pack_ext(
             self: MyType,
             allocator: std.mem.Allocator,
         ) ![]const u8 {
@@ -646,8 +641,16 @@ const MyType = struct {
             return out;
         }
 
-        fn packed_size(self: MyType) !usize {
+        pub fn packed_size(self: MyType) !usize {
             return self.buf.len;
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            buf: []const u8,
+        ) !MyType {
+            errdefer allocator.free(buf);
+            return MyType{ .buf = buf };
         }
     };
 };
