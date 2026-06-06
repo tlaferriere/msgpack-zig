@@ -16,8 +16,6 @@ pub fn build(b: *std.Build) void {
     const optimize = b.standardOptimizeOption(.{});
 
     const mod = b.addModule("msgpack", .{
-        // In this case the main source file is merely a path, however, in more
-        // complicated build scripts, this could be a generated file.
         .root_source_file = b.path("src/root.zig"),
         .target = target,
         .optimize = optimize,
@@ -25,21 +23,29 @@ pub fn build(b: *std.Build) void {
 
     // Creates a step for unit testing. This only builds the test executable
     // but does not run it.
-    const lib_unit_tests = b.addTest(.{
+    const lib_unit_test_mod = b.addModule("lib_unit_test_mod", .{
         .root_source_file = b.path("src/test.zig"),
         .target = target,
         .optimize = optimize,
     });
 
+    const lib_unit_tests = b.addTest(.{
+        .root_module = lib_unit_test_mod,
+    });
+
     const run_lib_unit_tests = b.addRunArtifact(lib_unit_tests);
 
-    const integration_tests = b.addTest(.{
+    const integration_test_mod = b.addModule("integration_test_mod", .{
         .root_source_file = b.path("test/test.zig"),
         .target = target,
         .optimize = optimize,
     });
 
-    integration_tests.root_module.addImport("msgpack", mod);
+    integration_test_mod.addImport("msgpack", mod);
+
+    const integration_tests = b.addTest(.{
+        .root_module = integration_test_mod,
+    });
 
     const run_integration_tests = b.addRunArtifact(integration_tests);
 
@@ -51,11 +57,10 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_lib_unit_tests.step);
 
     // Generate documentation for the module.
-    const lib = b.addSharedLibrary(.{
+    const lib = b.addLibrary(.{
         .name = "msgpack",
-        .root_source_file = b.path("src/root.zig"),
-        .target = target,
-        .optimize = optimize,
+        .root_module = mod,
+        .linkage = .static,
     });
 
     const install_docs = b.addInstallDirectory(.{

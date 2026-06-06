@@ -1,9 +1,9 @@
-const debug = @import("std").debug;
-const math = @import("std").math;
-const meta = @import("std").meta;
-const Signedness = @import("std").builtin.Signedness;
-const testing = @import("std").testing;
-const Type = @import("std").builtin.Type;
+const std = @import("std");
+const debug = std.debug;
+const math = std.math;
+const meta = std.meta;
+const Signedness = std.builtin.Signedness;
+const testing = std.testing;
 
 const MarkerMask = struct { marker: u8, mask: u8 = 0xFF };
 pub const MarkerMasks = struct {
@@ -133,42 +133,37 @@ pub const MarkerMasks = struct {
 };
 
 pub const Marker = init: {
-    // Generate the Marker Union from the
+    // Generate the Marker Union from the MarkerMasks struct fields
     const markers = @typeInfo(MarkerMasks).@"struct".decls;
-    var union_fields: [markers.len]Type.UnionField = undefined;
-    var enum_fields: [markers.len]Type.EnumField = undefined;
-    for (&union_fields, &enum_fields, markers) |*union_field, *enum_field, marker| {
+    var field_names: [markers.len][]const u8 = undefined;
+    var field_types: [markers.len]type = undefined;
+    var field_values: [markers.len]u8 = undefined;
+    var union_field_attrs: [markers.len]std.builtin.Type.UnionField.Attributes = undefined;
+
+    for (&field_names, &field_types, &field_values, &union_field_attrs, markers) |*name, *ft, *fv, *attr, marker| {
         const mask = @field(MarkerMasks, marker.name).mask;
-        const field_type = @Type(Type{
-            .int = .{
-                // Take the bits left in the byte as the value.
-                .bits = if (mask != 0xFF) math.log2_int_ceil(u16, ~mask) else 0,
-                .signedness = Signedness.unsigned,
-            },
-        });
-        enum_field.* = Type.EnumField{
-            .name = marker.name,
-            .value = @field(MarkerMasks, marker.name).marker,
-        };
-        union_field.* = Type.UnionField{
-            .type = field_type,
-            .name = marker.name,
-            .alignment = 1,
-        };
+        name.* = marker.name;
+        // Take the bits left in the byte as the value.
+        const bits: u16 = if (mask != 0xFF) math.log2_int_ceil(u16, ~mask) else 0;
+        ft.* = @Int(.unsigned, bits);
+        fv.* = @field(MarkerMasks, marker.name).marker;
+        attr.* = .{ .@"align" = 1 };
     }
-    break :init @Type(Type{ .@"union" = .{
-        .tag_type = @Type(Type{
-            .@"enum" = .{
-                .fields = &enum_fields,
-                .decls = &.{},
-                .tag_type = u8,
-                .is_exhaustive = true,
-            },
-        }),
-        .fields = &union_fields,
-        .decls = &.{},
-        .layout = .auto,
-    } });
+
+    const TagType: type = @Enum(
+        u8,
+        .exhaustive,
+        &field_names,
+        &field_values,
+    );
+
+    break :init @Union(
+        .auto,
+        TagType,
+        &field_names,
+        &field_types,
+        &union_field_attrs,
+    );
 };
 
 pub const MarkerDecodeError = error{NotAMarker};

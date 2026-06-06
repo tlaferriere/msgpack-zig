@@ -179,10 +179,10 @@ test "16-bit length map round-trip" {
         testing.allocator,
     );
     const len = 0b0001_0000;
-    var val = std.AutoArrayHashMap(u32, u32).init(testing.allocator);
-    defer val.deinit();
+    var val: std.array_hash_map.Auto(u32, u32) = .empty;
+    defer val.deinit(testing.allocator);
     for (0..len) |i| {
-        try val.put(@intCast(i), 0xDEADBEEF);
+        try val.put(testing.allocator, @intCast(i), 0xDEADBEEF);
     }
     try packer.pack(val);
     const buffer = packer.finish();
@@ -192,8 +192,8 @@ test "16-bit length map round-trip" {
         buffer,
         0,
     );
-    var unpacked = try message.unpack_as(std.AutoArrayHashMap(u32, u32));
-    defer unpacked.deinit();
+    var unpacked = try message.unpack_as(std.array_hash_map.Auto(u32, u32));
+    defer unpacked.deinit(testing.allocator);
     try testing.expectEqualDeep(
         val.keys(),
         unpacked.keys(),
@@ -209,10 +209,10 @@ test "32-bit length map round-trip" {
         testing.allocator,
     );
     const len = 0x00_01_00_00;
-    var val = std.AutoArrayHashMap(u32, u32).init(testing.allocator);
-    defer val.deinit();
+    var val: std.array_hash_map.Auto(u32, u32) = .empty;
+    defer val.deinit(testing.allocator);
     for (0..len) |i| {
-        try val.put(@intCast(i), 0xDEADBEEF);
+        try val.put(testing.allocator, @intCast(i), 0xDEADBEEF);
     }
     try packer.pack(val);
     const buffer = packer.finish();
@@ -222,8 +222,8 @@ test "32-bit length map round-trip" {
         buffer,
         0,
     );
-    var unpacked = try message.unpack_as(std.AutoArrayHashMap(u32, u32));
-    defer unpacked.deinit();
+    var unpacked = try message.unpack_as(std.array_hash_map.Auto(u32, u32));
+    defer unpacked.deinit(testing.allocator);
     try testing.expectEqualDeep(
         val.keys(),
         unpacked.keys(),

@@ -2,7 +2,6 @@ const std = @import("std");
 const maxInt = std.math.maxInt;
 const testing = std.testing;
 const Endian = std.builtin.Endian;
-const Type = std.builtin.Type;
 
 const marker = @import("marker.zig");
 const Marker = marker.Marker;
@@ -168,34 +167,18 @@ pub const Packer = struct {
         });
 
         const bytes_needed = @sizeOf(T);
-        std.mem.writeInt(
-            u8,
-            std.mem.bytesAsValue(
-                [1]u8,
-                self.buffer[self.offset .. self.offset + 1],
-            ),
-            mark,
-            Endian.big,
-        );
+        self.buffer[self.offset] = mark;
         self.offset += 1;
 
-        const OutType = @Type(
-            Type{
-                .int = Type.Int{
-                    .signedness = .unsigned,
-                    .bits = @typeInfo(T).float.bits,
-                },
-            },
-        );
+        const OutType = @Int(.unsigned, @typeInfo(T).float.bits);
         std.mem.writeInt(
             OutType,
-            std.mem.bytesAsValue(
-                [bytes_needed]u8,
-                self.buffer[self.offset .. self.offset + bytes_needed],
-            ),
+            @ptrCast(self.buffer[self.offset .. self.offset + bytes_needed].ptr),
             @bitCast(value),
             Endian.big,
         );
+        // TODO: Test the bug of this statement missing
+        self.offset += bytes_needed;
     }
 
     fn write_int(self: *Packer, comptime T: type, value: T) !void {
@@ -205,15 +188,7 @@ pub const Packer = struct {
             else
                 Marker{ .FixPositive = @intCast(value) });
 
-            std.mem.writeInt(
-                u8,
-                std.mem.bytesAsValue(
-                    [1]u8,
-                    self.buffer[self.offset .. self.offset + 1],
-                ),
-                mark,
-                Endian.big,
-            );
+            self.buffer[self.offset] = mark;
             self.offset += 1;
             return;
         }
@@ -225,45 +200,24 @@ pub const Packer = struct {
             .{ .signed = Marker.Int_64, .unsigned = Marker.Uint_64 },
         };
         inline for (byte_counts, markers) |byte_count, mark| {
-            const i = @Type(Type{
-                .int = Type.Int{
-                    .signedness = .signed,
-                    .bits = byte_count * 8,
-                },
-            });
-            const u = @Type(Type{
-                .int = Type.Int{
-                    .signedness = .unsigned,
-                    .bits = byte_count * 8,
-                },
-            });
+            const i = @Int(.signed, byte_count * 8);
+            const u = @Int(.unsigned, byte_count * 8);
             if (std.math.minInt(i) <= value and value <= maxInt(u)) {
                 comptime var type_info = @typeInfo(T);
                 type_info.int.bits = byte_count * 8;
-                const OutType = @Type(type_info);
+                const OutType = @Int(type_info.int.signedness, type_info.int.bits);
 
-                std.mem.writeInt(
-                    u8,
-                    std.mem.bytesAsValue(
-                        [1]u8,
-                        self.buffer[self.offset .. self.offset + 1],
-                    ),
-                    marker.encode(
-                        if (type_info.int.signedness == .signed and value <= maxInt(OutType))
-                            mark.signed
-                        else
-                            mark.unsigned,
-                    ),
-                    Endian.big,
+                self.buffer[self.offset] = marker.encode(
+                    if (type_info.int.signedness == .signed and value <= maxInt(OutType))
+                        mark.signed
+                    else
+                        mark.unsigned,
                 );
                 self.offset += 1;
 
                 std.mem.writeInt(
                     OutType,
-                    std.mem.bytesAsValue(
-                        [byte_count]u8,
-                        self.buffer[self.offset .. self.offset + byte_count],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + byte_count].ptr),
                     @intCast(value),
                     Endian.big,
                 );
@@ -288,15 +242,7 @@ pub const Packer = struct {
                 return SerializeError.StringTooLarge;
             };
 
-        std.mem.writeInt(
-            u8,
-            std.mem.bytesAsValue(
-                [1]u8,
-                self.buffer[self.offset .. self.offset + 1],
-            ),
-            marker.encode(mark),
-            Endian.big,
-        );
+        self.buffer[self.offset] = marker.encode(mark);
         self.offset += 1;
 
         inline for (.{
@@ -308,10 +254,7 @@ pub const Packer = struct {
                 const byte_count = @typeInfo(OutType).int.bits / 8;
                 std.mem.writeInt(
                     OutType,
-                    std.mem.bytesAsValue(
-                        [byte_count]u8,
-                        self.buffer[self.offset .. self.offset + byte_count],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + byte_count].ptr),
                     @intCast(len),
                     Endian.big,
                 );
@@ -337,15 +280,7 @@ pub const Packer = struct {
                 return SerializeError.StringTooLarge;
             };
 
-        std.mem.writeInt(
-            u8,
-            std.mem.bytesAsValue(
-                [1]u8,
-                self.buffer[self.offset .. self.offset + 1],
-            ),
-            marker.encode(mark),
-            Endian.big,
-        );
+        self.buffer[self.offset] = marker.encode(mark);
         self.offset += 1;
 
         inline for (.{
@@ -357,10 +292,7 @@ pub const Packer = struct {
                 const byte_count = @typeInfo(OutType).int.bits / 8;
                 std.mem.writeInt(
                     OutType,
-                    std.mem.bytesAsValue(
-                        [byte_count]u8,
-                        self.buffer[self.offset .. self.offset + byte_count],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + byte_count].ptr),
                     @intCast(len),
                     Endian.big,
                 );
@@ -394,15 +326,7 @@ pub const Packer = struct {
                 return SerializeError.ArrayTooLarge;
             };
 
-        std.mem.writeInt(
-            u8,
-            std.mem.bytesAsValue(
-                [1]u8,
-                self.buffer[self.offset .. self.offset + 1],
-            ),
-            marker.encode(mark),
-            Endian.big,
-        );
+        self.buffer[self.offset] = marker.encode(mark);
         self.offset += 1;
 
         switch (mark) {
@@ -410,10 +334,7 @@ pub const Packer = struct {
             .Array_16 => {
                 std.mem.writeInt(
                     u16,
-                    std.mem.bytesAsValue(
-                        [2]u8,
-                        self.buffer[self.offset .. self.offset + 2],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 2].ptr),
                     @intCast(len),
                     Endian.big,
                 );
@@ -422,10 +343,7 @@ pub const Packer = struct {
             .Array_32 => {
                 std.mem.writeInt(
                     u32,
-                    std.mem.bytesAsValue(
-                        [4]u8,
-                        self.buffer[self.offset .. self.offset + 4],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 4].ptr),
                     @intCast(len),
                     Endian.big,
                 );
@@ -451,15 +369,7 @@ pub const Packer = struct {
                 return SerializeError.MapTooLarge;
             };
 
-        std.mem.writeInt(
-            u8,
-            std.mem.bytesAsValue(
-                [1]u8,
-                self.buffer[self.offset .. self.offset + 1],
-            ),
-            marker.encode(mark),
-            Endian.big,
-        );
+        self.buffer[self.offset] = marker.encode(mark);
         self.offset += 1;
 
         switch (mark) {
@@ -467,10 +377,7 @@ pub const Packer = struct {
             .Map_16 => {
                 std.mem.writeInt(
                     u16,
-                    std.mem.bytesAsValue(
-                        [2]u8,
-                        self.buffer[self.offset .. self.offset + 2],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 2].ptr),
                     @intCast(count),
                     Endian.big,
                 );
@@ -479,10 +386,7 @@ pub const Packer = struct {
             .Map_32 => {
                 std.mem.writeInt(
                     u32,
-                    std.mem.bytesAsValue(
-                        [4]u8,
-                        self.buffer[self.offset .. self.offset + 4],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 4].ptr),
                     @intCast(count),
                     Endian.big,
                 );
@@ -519,15 +423,7 @@ pub const Packer = struct {
                 return SerializeError.MapTooLarge;
             };
 
-        std.mem.writeInt(
-            u8,
-            std.mem.bytesAsValue(
-                [1]u8,
-                self.buffer[self.offset .. self.offset + 1],
-            ),
-            marker.encode(mark),
-            Endian.big,
-        );
+        self.buffer[self.offset] = marker.encode(mark);
         self.offset += 1;
 
         switch (mark) {
@@ -535,10 +431,7 @@ pub const Packer = struct {
             .Map_16 => {
                 std.mem.writeInt(
                     u16,
-                    std.mem.bytesAsValue(
-                        [2]u8,
-                        self.buffer[self.offset .. self.offset + 2],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 2].ptr),
                     @intCast(count),
                     Endian.big,
                 );
@@ -547,10 +440,7 @@ pub const Packer = struct {
             .Map_32 => {
                 std.mem.writeInt(
                     u32,
-                    std.mem.bytesAsValue(
-                        [4]u8,
-                        self.buffer[self.offset .. self.offset + 4],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 4].ptr),
                     @intCast(count),
                     Endian.big,
                 );
@@ -603,10 +493,7 @@ pub const Packer = struct {
             .Ext_16 => {
                 std.mem.writeInt(
                     u16,
-                    std.mem.bytesAsValue(
-                        [2]u8,
-                        self.buffer[self.offset .. self.offset + 2],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 2].ptr),
                     @intCast(size),
                     Endian.big,
                 );
@@ -615,10 +502,7 @@ pub const Packer = struct {
             .Ext_32 => {
                 std.mem.writeInt(
                     u32,
-                    std.mem.bytesAsValue(
-                        [4]u8,
-                        self.buffer[self.offset .. self.offset + 4],
-                    ),
+                    @ptrCast(self.buffer[self.offset .. self.offset + 4].ptr),
                     @intCast(size),
                     Endian.big,
                 );
@@ -816,9 +700,5 @@ fn struct_packed_size(object: anytype) !usize {
             }
             return packed_len;
         },
-        // else => {
-        //     @compileLog(@TypeOf(object).__msgpack_pack_repr__);
-        //     @compileError("Struct size cannot be evaluated.");
-        // },
     }
 }

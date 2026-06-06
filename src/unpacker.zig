@@ -6,7 +6,6 @@ const Type = std.builtin.Type;
 const marker = @import("marker.zig");
 const Marker = marker.Marker;
 
-/// Deserialization Errors
 pub const DeserializeError = error{
     TypeTooSmall,
     WrongType,
@@ -16,21 +15,11 @@ pub const DeserializeError = error{
     WrongFields,
 };
 
-/// Msgpack unpacker.
-///
-/// # Memory safety
-/// This object **_borrows_** the buffer you wish to unpack, therefore it is your
-/// responsiblity to ensure the buffer lives long enough for you to unpack
-/// everything you want before freeing this buffer.
-///
-/// All values read from this buffer are copied out, hence the allocator for
-/// runtime-sized types.
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
     buffer: []const u8,
     offset: usize,
 
-    /// Initialize a msgpack unpacker with a **_borrowed_** message buffer.
     pub fn init(
         allocator: std.mem.Allocator,
         buffer: []const u8,
@@ -43,43 +32,6 @@ pub const Unpacker = struct {
         };
     }
 
-    /// Unpack an object from the buffer.
-    ///
-    /// # Memory Safety
-    /// This method will attempt to unpack an object of the type you pass in.
-    /// In all cases this method will copy the memory, decoupling the value's
-    /// lifetime from the msgpacked buffer's lifetime.
-    ///
-    /// If the type's size is only known at runtime, it will be allocated with
-    /// the allocator provided to `init` and ownership of the object is
-    /// transferred to the caller.
-    ///
-    /// # Type Families
-    /// Msgpack has a few different type families with their particularities.
-    ///
-    /// ## Integers
-    /// TODO
-    ///
-    /// ## Floats
-    /// TODO
-    ///
-    /// ## Strings and Binary Strings
-    /// TODO
-    ///
-    /// ## Arrays
-    /// TODO
-    ///
-    /// ## Maps
-    /// TODO
-    ///
-    /// ## Extension types
-    /// You can define extension types by creating a struct with a
-    /// `__msgpack_repr__` declaration with type `msgpack.Repr`.
-    /// Specifically, you must use the `Repr.Ext` and provide the `type_id` (a
-    /// `u8`) and a callback taking a byte slice.
-    ///
-    /// The callback takes ownership of the byte-slice, therefore it is your
-    /// responsibility to free the memory once you are done with it.
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .int => |int| self.unpack_int(int, As),
@@ -121,9 +73,7 @@ pub const Unpacker = struct {
                     return self.unpack_struct(As);
                 }
                 if (@hasDecl(As, "put") and
-                    ((@hasDecl(As, "init") and
-                        @typeInfo(@TypeOf(As.put)).@"fn".params.len == 3) or
-                        @typeInfo(@TypeOf(As.put)).@"fn".params.len == 4) and
+                    @typeInfo(@TypeOf(As.put)).@"fn".params.len == 4 and
                     @hasDecl(As, "KV"))
                 {
                     return self.unpack_map(As);
@@ -176,7 +126,8 @@ pub const Unpacker = struct {
                     @floatCast(
                         @as(f64, @bitCast(std.mem.readVarInt(
                             u64,
-                            self.buffer[self.offset + 1 .. self.offset + 9],
+                            self.buffer[self.offset +
+                                1 .. self.offset + 9],
                             Endian.big,
                         ))),
                     ),
@@ -234,8 +185,7 @@ pub const Unpacker = struct {
                 else => {
                     if (self.buffer[self.offset] & 0x80 != 0)
                         return DeserializeError.WrongType;
-                    // Fixint
-                    const value: As = @intCast(self.buffer[self.offset]); // Unsafe if compiler-optimized.
+                    const value: As = @intCast(self.buffer[self.offset]);
                     self.offset += 1;
                     return value;
                 },
@@ -349,10 +299,7 @@ pub const Unpacker = struct {
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
                 } else {
-                    // if (info == .Pointer) {
-                    // @compileLog("FixArray to unknown size size array: ", info);
                     array = try self.allocator.alloc(info.pointer.child, len);
-                    // }
                 }
                 self.offset += 1;
             },
@@ -365,10 +312,7 @@ pub const Unpacker = struct {
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
                 } else {
-                    // if (info == .Pointer) {
-                    // @compileLog("FixArray to unknown size size array: ", info);
                     array = try self.allocator.alloc(info.pointer.child, len);
-                    // }
                 }
                 self.offset += 3;
             },
@@ -381,10 +325,7 @@ pub const Unpacker = struct {
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
                 } else {
-                    // if (info == .Pointer) {
-                    // @compileLog("FixArray to unknown size size array: ", info);
                     array = try self.allocator.alloc(info.pointer.child, len);
-                    // }
                 }
                 self.offset += 5;
             },
@@ -397,7 +338,7 @@ pub const Unpacker = struct {
     }
 
     fn unpack_map(self: *Unpacker, comptime As: type) !As {
-        var map: As = As.init(self.allocator);
+        var map: As = .empty;
         const len = switch (try marker.decode(self.buffer[self.offset])) {
             .FixMap => |len| blk: {
                 self.offset += 1;
@@ -423,11 +364,12 @@ pub const Unpacker = struct {
             },
             else => return DeserializeError.WrongType,
         };
-        try map.ensureTotalCapacity(len);
+        try map.ensureTotalCapacity(self.allocator, len);
         for (0..len) |_| {
             try map.put(
-                try self.unpack_as(std.meta.FieldType(As.KV, .key)),
-                try self.unpack_as(std.meta.FieldType(As.KV, .value)),
+                self.allocator,
+                try self.unpack_as(@TypeOf(@as(As.KV, undefined).key)),
+                try self.unpack_as(@TypeOf(@as(As.KV, undefined).value)),
             );
         }
         return map;

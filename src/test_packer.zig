@@ -280,10 +280,7 @@ test "Serialize i128 to uint64" {
     var packer = try Packer.init(
         testing.allocator,
     );
-    const val: i128 = @bitCast(@as(
-        u128,
-        0xFFFFFFFFFFFFFFFF_DEADBEEFDEADBEEF,
-    ));
+    const val: i128 = @bitCast(@as(u128, 0xFFFFFFFFFFFFFFFF_DEADBEEFDEADBEEF));
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);
@@ -297,10 +294,7 @@ test "Serialize error IntTooLarge with int" {
     var packer = try Packer.init(
         testing.allocator,
     );
-    const val: i128 = @bitCast(@as(
-        u128,
-        0xFFFFFFFFFFFFFFF0_DEADBEEFDEADBEEF,
-    ));
+    const val: i128 = @bitCast(@as(u128, 0xFFFFFFFFFFFFFFF0_DEADBEEFDEADBEEF));
     try testing.expectError(
         SerializeError.IntTooLarge,
         packer.pack(val),
@@ -609,11 +603,11 @@ test "Serialize FixMap" {
     var packer = try Packer.init(
         testing.allocator,
     );
-    var val = std.StringArrayHashMap(i32).init(testing.allocator);
-    defer val.deinit();
-    try val.put("key1", 0x0EADBEEF);
-    try val.put("key2", 32);
-    try val.put("key3", -1);
+    var val: std.array_hash_map.String(i32) = .empty;
+    defer val.deinit(testing.allocator);
+    try val.put(testing.allocator, "key1", 0x0EADBEEF);
+    try val.put(testing.allocator, "key2", 32);
+    try val.put(testing.allocator, "key3", -1);
     try packer.pack(val);
     const actual = packer.finish();
     defer testing.allocator.free(actual);

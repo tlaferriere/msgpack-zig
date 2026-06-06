@@ -483,17 +483,17 @@ test "Deserialize FixMap" {
         "\x83\xA4key1\xd2\x0E\xAD\xBE\xEF\xA4key2\x20\xA4key3\xFF",
         0,
     );
-    var val = std.StringArrayHashMap(i32).init(testing.allocator);
-    defer val.deinit();
-    try val.put("key1", 0x0EADBEEF);
-    try val.put("key2", 32);
-    try val.put("key3", -1);
-    var unpacked = try message.unpack_as(std.StringArrayHashMap(i32));
+    var val: std.array_hash_map.String(i32) = .empty;
+    defer val.deinit(testing.allocator);
+    try val.put(testing.allocator, "key1", 0x0EADBEEF);
+    try val.put(testing.allocator, "key2", 32);
+    try val.put(testing.allocator, "key3", -1);
+    var unpacked = try message.unpack_as(std.array_hash_map.String(i32));
     defer {
         for (unpacked.keys()) |key| {
             testing.allocator.free(key);
         }
-        unpacked.deinit();
+        unpacked.deinit(testing.allocator);
     }
     try testing.expectEqualDeep(
         val.keys(),
