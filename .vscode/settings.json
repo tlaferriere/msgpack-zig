@@ -1,5 +1,4 @@
 {
-    "zig.path": "${workspaceFolder}/zig/zig",
     "editor.rulers": [
         80
     ]
