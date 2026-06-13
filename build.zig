@@ -56,6 +56,27 @@ pub fn build(b: *std.Build) void {
     test_step.dependOn(&run_integration_tests.step);
     test_step.dependOn(&run_lib_unit_tests.step);
 
+    // Fuzz tests — compiled with -ffuzz instrumentation.
+    // Run via: zig build test --release=safe --fuzz
+    const fuzz_test_mod = b.addModule("fuzz_test_mod", .{
+        .root_source_file = b.path("fuzz/fuzz.zig"),
+        .target = target,
+        .optimize = optimize,
+    });
+    fuzz_test_mod.addImport("msgpack", mod);
+
+    const fuzz_tests = b.addTest(.{
+        .root_module = fuzz_test_mod,
+    });
+
+    const run_fuzz_tests = b.addRunArtifact(fuzz_tests);
+    test_step.dependOn(&run_fuzz_tests.step);
+
+    // Fuzz step for standalone fuzzing (zig build fuzz -- --fuzz).
+    // Also accessible via the standard `test` step with --fuzz flag.
+    const fuzz_step = b.step("fuzz", "Run fuzz tests (alias for 'zig build test --release=safe --fuzz')");
+    fuzz_step.dependOn(test_step);
+
     // Generate documentation for the module.
     const lib = b.addLibrary(.{
         .name = "msgpack",
