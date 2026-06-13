@@ -771,3 +771,136 @@ test "OOB: Str32 with huge length" {
         message.unpack_as([]const u8),
     );
 }
+
+test "OOB: Str16 slice panics before bounds check (repro: index 3, len 2)" {
+    // Str16 marker (0xda) + only 1 extra byte = 2 bytes total.
+    // The unpacker creates buffer[1..3] before checking if 3 bytes exist,
+    // causing an index-out-of-bounds panic.
+    var message = try Unpacker.init(testing.allocator, "\xda\x00", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Str16 with only 1 byte total" {
+    // Str16 marker alone — not even the first length byte is present.
+    var message = try Unpacker.init(testing.allocator, "\xda", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Bin16 slice panics before bounds check" {
+    // Bin16 marker (0xc5) + only 1 extra byte = 2 bytes total.
+    var message = try Unpacker.init(testing.allocator, "\xc5\x00", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Str32 with short buffer panics before bounds check" {
+    // Str32 marker (0xdb) + only 1 extra byte = 2 bytes total.
+    // The unpacker creates buffer[1..5] before checking, causing OOB.
+    var message = try Unpacker.init(testing.allocator, "\xdb\x00", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Bin32 with short buffer panics before bounds check" {
+    // Bin32 marker (0xc6) + only 1 extra byte = 2 bytes total.
+    var message = try Unpacker.init(testing.allocator, "\xc6\x00", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Int8 with 1-byte buffer" {
+    // Int8 marker (0xd0) but no data byte.
+    var message = try Unpacker.init(testing.allocator, "\xd0", 0);
+    _ = message.unpack_as(i8) catch {};
+}
+
+test "OOB: Uint8 with 1-byte buffer" {
+    // Uint8 marker (0xcc) but no data byte.
+    var message = try Unpacker.init(testing.allocator, "\xcc", 0);
+    _ = message.unpack_as(u8) catch {};
+}
+
+test "OOB: Int16 with 2-byte buffer" {
+    // Int16 marker (0xd1) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xd1\x00", 0);
+    _ = message.unpack_as(i16) catch {};
+}
+
+test "OOB: Uint16 with 2-byte buffer" {
+    // Uint16 marker (0xcd) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xcd\x00", 0);
+    _ = message.unpack_as(u16) catch {};
+}
+
+test "OOB: Int32 with 2-byte buffer" {
+    // Int32 marker (0xd2) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xd2\x00", 0);
+    _ = message.unpack_as(i32) catch {};
+}
+
+test "OOB: Uint32 with 2-byte buffer" {
+    // Uint32 marker (0xce) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xce\x00", 0);
+    _ = message.unpack_as(u32) catch {};
+}
+
+test "OOB: Int64 with 2-byte buffer" {
+    // Int64 marker (0xd3) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xd3\x00", 0);
+    _ = message.unpack_as(i64) catch {};
+}
+
+test "OOB: Uint64 with 2-byte buffer" {
+    // Uint64 marker (0xcf) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xcf\x00", 0);
+    _ = message.unpack_as(u64) catch {};
+}
+
+test "OOB: Float32 with 2-byte buffer" {
+    // Float32 marker (0xca) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xca\x00", 0);
+    _ = message.unpack_as(f32) catch {};
+}
+
+test "OOB: Float64 with 2-byte buffer" {
+    // Float64 marker (0xcb) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xcb\x00", 0);
+    _ = message.unpack_as(f64) catch {};
+}
+
+test "OOB: FixArray with short buffer" {
+    // FixArray of length 1 (0x91) but no element data.
+    var message = try Unpacker.init(testing.allocator, "\x91", 0);
+    _ = message.unpack_as([]u8) catch {};
+}
+
+test "OOB: Array16 with 2-byte buffer" {
+    // Array16 marker (0xdc) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xdc\x00", 0);
+    _ = message.unpack_as([]u8) catch {};
+}
+
+test "OOB: Array32 with 2-byte buffer" {
+    // Array32 marker (0xdd) + only 1 extra byte.
+    var message = try Unpacker.init(testing.allocator, "\xdd\x00", 0);
+    _ = message.unpack_as([]u8) catch {};
+}
+
+test "OOB: empty buffer" {
+    // Empty input — the fuzzer already guards against this, but the
+    // unpacker should handle it gracefully too.
+    var message = try Unpacker.init(testing.allocator, "", 0);
+    _ = message.unpack_as(u8) catch {};
+}
