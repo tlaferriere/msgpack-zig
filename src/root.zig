@@ -107,13 +107,14 @@ pub const Timestamp = struct {
                         buffer,
                         Endian.big,
                     );
-                    const timestamp = Timestamp{
-                        .seconds = @bitCast(data & 0x00000003ffffffff),
-                        .nanoseconds = @intCast(data >> 34),
-                    };
-                    if (timestamp.nanoseconds > 999_999_999) {
+                    const nanos: u64 = data >> 34;
+                    if (nanos > 999_999_999) {
                         return Error.TooManyNanoseconds;
                     }
+                    const timestamp = Timestamp{
+                        .seconds = @bitCast(data & 0x00000003ffffffff),
+                        .nanoseconds = @intCast(nanos),
+                    };
                     break :blk timestamp;
                 },
                 12 => blk: {

@@ -32,10 +32,15 @@ pub const Unpacker = struct {
         };
     }
 
+    fn peek_marker(self: *Unpacker) !Marker {
+        if (self.offset >= self.buffer.len) return DeserializeError.Finished;
+        return marker.decode(self.buffer[self.offset]);
+    }
+
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .int => |int| self.unpack_int(int, As),
-            .bool => switch (try marker.decode(self.buffer[self.offset])) {
+            .bool => switch (try self.peek_marker()) {
                 .False => {
                     self.offset += 1;
                     return false;
@@ -46,7 +51,7 @@ pub const Unpacker = struct {
                 },
                 else => DeserializeError.WrongType,
             },
-            .optional => |optional| switch (try marker.decode(self.buffer[self.offset])) {
+            .optional => |optional| switch (try self.peek_marker()) {
                 .Nil => {
                     self.offset += 1;
                     return null;
@@ -105,8 +110,9 @@ pub const Unpacker = struct {
         comptime float: Type.Float,
         comptime As: type,
     ) !As {
-        return switch (try marker.decode(self.buffer[self.offset])) {
+        return switch (try self.peek_marker()) {
             .Float_32 => if (float.bits >= 32) {
+                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                 const value = @as(
                     As,
                     @floatCast(
@@ -121,6 +127,7 @@ pub const Unpacker = struct {
                 return value;
             } else DeserializeError.TypeTooSmall,
             .Float_64 => if (float.bits >= 64) {
+                if (self.buffer.len - self.offset < 9) return DeserializeError.Finished;
                 const value = @as(
                     As,
                     @floatCast(
@@ -145,8 +152,9 @@ pub const Unpacker = struct {
         comptime As: type,
     ) !As {
         return switch (int.signedness) {
-            .unsigned => switch (try marker.decode(self.buffer[self.offset])) {
+            .unsigned => switch (try self.peek_marker()) {
                 .Uint_64 => if (int.bits >= 64) {
+                    if (self.buffer.len - self.offset < 9) return DeserializeError.Finished;
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 9],
@@ -157,6 +165,7 @@ pub const Unpacker = struct {
                 } else DeserializeError.TypeTooSmall,
 
                 .Uint_32 => if (int.bits >= 32) {
+                    if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 5],
@@ -167,6 +176,7 @@ pub const Unpacker = struct {
                 } else DeserializeError.TypeTooSmall,
 
                 .Uint_16 => if (int.bits >= 16) {
+                    if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 3],
@@ -177,6 +187,7 @@ pub const Unpacker = struct {
                 } else DeserializeError.TypeTooSmall,
 
                 .Uint_8 => if (int.bits >= 8) {
+                    if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
                     const value: As = @intCast(self.buffer[self.offset + 1]);
                     self.offset += 2;
                     return value;
@@ -190,8 +201,9 @@ pub const Unpacker = struct {
                     return value;
                 },
             },
-            .signed => switch (try marker.decode(self.buffer[self.offset])) {
+            .signed => switch (try self.peek_marker()) {
                 .Uint_64, .Int_64 => if (int.bits >= 64) {
+                    if (self.buffer.len - self.offset < 9) return DeserializeError.Finished;
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 9],
@@ -202,6 +214,7 @@ pub const Unpacker = struct {
                 } else DeserializeError.TypeTooSmall,
 
                 .Uint_32, .Int_32 => if (int.bits >= 32) {
+                    if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 5],
@@ -212,6 +225,7 @@ pub const Unpacker = struct {
                 } else DeserializeError.TypeTooSmall,
 
                 .Uint_16, .Int_16 => if (int.bits >= 16) {
+                    if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                     const value = std.mem.readVarInt(
                         As,
                         self.buffer[self.offset + 1 .. self.offset + 3],
@@ -222,12 +236,14 @@ pub const Unpacker = struct {
                 } else DeserializeError.TypeTooSmall,
 
                 .Uint_8 => if (int.bits > 8) {
+                    if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
                     const value: As = @intCast(self.buffer[self.offset + 1]);
                     self.offset += 2;
                     return value;
                 } else DeserializeError.TypeTooSmall,
 
                 .Int_8 => if (int.bits >= 8) {
+                    if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
                     const value: As = @intCast(
                         @as(i8, @bitCast(self.buffer[self.offset + 1])),
                     );
@@ -251,8 +267,9 @@ pub const Unpacker = struct {
     }
 
     fn unpack_string(self: *Unpacker, comptime As: type) !As {
-        const len: usize = switch (try marker.decode(self.buffer[self.offset])) {
+        const len: usize = switch (try self.peek_marker()) {
             .Bin_32, .Str_32 => blk: {
+                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     usize,
                     self.buffer[self.offset + 1 .. self.offset + 5],
@@ -262,6 +279,7 @@ pub const Unpacker = struct {
                 break :blk len;
             },
             .Bin_16, .Str_16 => blk: {
+                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     usize,
                     self.buffer[self.offset + 1 .. self.offset + 3],
@@ -271,6 +289,7 @@ pub const Unpacker = struct {
                 break :blk len;
             },
             .Bin_8, .Str_8 => blk: {
+                if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
                 const len: usize = @intCast(self.buffer[self.offset + 1]);
                 self.offset += 2;
                 break :blk len;
@@ -297,7 +316,7 @@ pub const Unpacker = struct {
     ) !As {
         const info = @typeInfo(As);
         var array: As = undefined;
-        switch (try marker.decode(self.buffer[self.offset])) {
+        switch (try self.peek_marker()) {
             .FixArray => |len| {
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
@@ -307,6 +326,7 @@ pub const Unpacker = struct {
                 self.offset += 1;
             },
             .Array_16 => {
+                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u16,
                     self.buffer[self.offset + 1 .. self.offset + 3],
@@ -320,6 +340,7 @@ pub const Unpacker = struct {
                 self.offset += 3;
             },
             .Array_32 => {
+                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u32,
                     self.buffer[self.offset + 1 .. self.offset + 5],
@@ -342,12 +363,13 @@ pub const Unpacker = struct {
 
     fn unpack_map(self: *Unpacker, comptime As: type) !As {
         var map: As = .empty;
-        const len = switch (try marker.decode(self.buffer[self.offset])) {
+        const len = switch (try self.peek_marker()) {
             .FixMap => |len| blk: {
                 self.offset += 1;
                 break :blk len;
             },
             .Map_16 => blk: {
+                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u16,
                     self.buffer[self.offset + 1 .. self.offset + 3],
@@ -357,6 +379,7 @@ pub const Unpacker = struct {
                 break :blk len;
             },
             .Map_32 => blk: {
+                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u32,
                     self.buffer[self.offset + 1 .. self.offset + 5],
@@ -425,12 +448,13 @@ pub const Unpacker = struct {
     }
 
     fn unpack_map_as_struct(self: *Unpacker, comptime As: type) !As {
-        const len = switch (try marker.decode(self.buffer[self.offset])) {
+        const len = switch (try self.peek_marker()) {
             .FixMap => |len| blk: {
                 self.offset += 1;
                 break :blk len;
             },
             .Map_16 => blk: {
+                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u16,
                     self.buffer[self.offset + 1 .. self.offset + 3],
@@ -440,6 +464,7 @@ pub const Unpacker = struct {
                 break :blk len;
             },
             .Map_32 => blk: {
+                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u32,
                     self.buffer[self.offset + 1 .. self.offset + 5],
@@ -501,7 +526,7 @@ pub const Unpacker = struct {
     };
 
     fn ext_decode(self: *Unpacker) !ExtMetadata {
-        const mark = try marker.decode(self.buffer[self.offset]);
+        const mark = try self.peek_marker();
         self.offset += 1;
         const len: usize = switch (mark) {
             .FixExt_1 => 1,
@@ -510,11 +535,13 @@ pub const Unpacker = struct {
             .FixExt_8 => 8,
             .FixExt_16 => 16,
             .Ext_8 => blk: {
+                if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
                 const len = self.buffer[self.offset];
                 self.offset += 1;
                 break :blk len;
             },
             .Ext_16 => blk: {
+                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u16,
                     self.buffer[self.offset .. self.offset + 2],
@@ -524,6 +551,7 @@ pub const Unpacker = struct {
                 break :blk len;
             },
             .Ext_32 => blk: {
+                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
                 const len = std.mem.readVarInt(
                     u32,
                     self.buffer[self.offset .. self.offset + 4],
@@ -534,6 +562,7 @@ pub const Unpacker = struct {
             },
             else => return DeserializeError.WrongType,
         };
+        if (self.buffer.len - self.offset < 1) return DeserializeError.Finished;
         const type_id: i8 = @bitCast(self.buffer[self.offset]);
         self.offset += 1;
         return ExtMetadata{
