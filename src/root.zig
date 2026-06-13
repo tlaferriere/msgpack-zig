@@ -154,21 +154,18 @@ pub const Timestamp = struct {
 test Timestamp {
     const testing = std.testing;
 
-    var packer = try Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
     const val = Timestamp{
         .seconds = 0x0EADBEEFDEADBEEF,
         .nanoseconds = 1,
     };
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as(Timestamp);
     try testing.expectEqualDeep(
         val,

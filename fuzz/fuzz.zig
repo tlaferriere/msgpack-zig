@@ -59,7 +59,8 @@ test "fuzz unpack raw bytes" {
                     []const u8,
                     msgpack.Timestamp,
                 }) |T| {
-                    var u = Unpacker.init(testing.allocator, input, 0) catch continue;
+                    var r = std.Io.Reader.fixed(input);
+                    var u = Unpacker.init(testing.allocator, &r);
                     if (T == []const u8) {
                         if (u.unpack_as(T)) |s| {
                             defer testing.allocator.free(s);
@@ -83,14 +84,16 @@ test "fuzz round-trip u64" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var packer = try Packer.init(testing.allocator);
-                defer testing.allocator.free(packer.finish());
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
 
                 const val = smith.value(u64);
                 try packer.pack(val);
-                const buf = packer.finish();
+                packer.finish();
 
-                var unpacker = try Unpacker.init(testing.allocator, buf, 0);
+                var r = std.Io.Reader.fixed(aw.written());
+                var unpacker = Unpacker.init(testing.allocator, &r);
                 const result = try unpacker.unpack_as(u64);
                 try testing.expectEqual(val, result);
             }
@@ -107,14 +110,16 @@ test "fuzz round-trip i64" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var packer = try Packer.init(testing.allocator);
-                defer testing.allocator.free(packer.finish());
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
 
                 const val = smith.value(i64);
                 try packer.pack(val);
-                const buf = packer.finish();
+                packer.finish();
 
-                var unpacker = try Unpacker.init(testing.allocator, buf, 0);
+                var r = std.Io.Reader.fixed(aw.written());
+                var unpacker = Unpacker.init(testing.allocator, &r);
                 const result = try unpacker.unpack_as(i64);
                 try testing.expectEqual(val, result);
             }
@@ -131,14 +136,16 @@ test "fuzz round-trip optional u32" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var packer = try Packer.init(testing.allocator);
-                defer testing.allocator.free(packer.finish());
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
 
                 const val = smith.value(?u32);
                 try packer.pack(val);
-                const buf = packer.finish();
+                packer.finish();
 
-                var unpacker = try Unpacker.init(testing.allocator, buf, 0);
+                var r = std.Io.Reader.fixed(aw.written());
+                var unpacker = Unpacker.init(testing.allocator, &r);
                 const result = try unpacker.unpack_as(?u32);
                 try testing.expectEqual(val, result);
             }
@@ -155,14 +162,16 @@ test "fuzz round-trip bool" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var packer = try Packer.init(testing.allocator);
-                defer testing.allocator.free(packer.finish());
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
 
                 const val = smith.value(bool);
                 try packer.pack(val);
-                const buf = packer.finish();
+                packer.finish();
 
-                var unpacker = try Unpacker.init(testing.allocator, buf, 0);
+                var r = std.Io.Reader.fixed(aw.written());
+                var unpacker = Unpacker.init(testing.allocator, &r);
                 const result = try unpacker.unpack_as(bool);
                 try testing.expectEqual(val, result);
             }
@@ -179,14 +188,16 @@ test "fuzz round-trip f64" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var packer = try Packer.init(testing.allocator);
-                defer testing.allocator.free(packer.finish());
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
 
                 const val = smith.value(f64);
                 try packer.pack(val);
-                const buf = packer.finish();
+                packer.finish();
 
-                var unpacker = try Unpacker.init(testing.allocator, buf, 0);
+                var r = std.Io.Reader.fixed(aw.written());
+                var unpacker = Unpacker.init(testing.allocator, &r);
                 const result = try unpacker.unpack_as(f64);
 
                 // NaN != NaN, use bitwise comparison for NaN

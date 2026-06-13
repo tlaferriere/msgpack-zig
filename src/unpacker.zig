@@ -17,43 +17,43 @@ pub const DeserializeError = error{
 
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
-    buffer: []const u8,
-    offset: usize,
+    reader: *std.Io.Reader,
 
-    pub fn init(
-        allocator: std.mem.Allocator,
-        buffer: []const u8,
-        offset: usize,
-    ) !Unpacker {
+    /// Initialize from a Reader (e.g. file, network, fixed buffer).
+    pub fn init(allocator: std.mem.Allocator, reader: *std.Io.Reader) Unpacker {
         return Unpacker{
             .allocator = allocator,
-            .buffer = buffer,
-            .offset = offset,
+            .reader = reader,
         };
     }
 
+    fn take_marker(self: *Unpacker) !Marker {
+        const byte = try self.reader.takeByte();
+        return marker.decode(byte);
+    }
+
+    /// Decode the next marker without consuming it, so a nested `unpack_as`
+    /// can read it again (used for optionals).
     fn peek_marker(self: *Unpacker) !Marker {
-        if (self.offset >= self.buffer.len) return DeserializeError.Finished;
-        return marker.decode(self.buffer[self.offset]);
+        const byte = try self.reader.peekByte();
+        return marker.decode(byte);
     }
 
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .int => |int| self.unpack_int(int, As),
-            .bool => switch (try self.peek_marker()) {
+            .bool => switch (try self.take_marker()) {
                 .False => {
-                    self.offset += 1;
                     return false;
                 },
                 .True => {
-                    self.offset += 1;
                     return true;
                 },
                 else => DeserializeError.WrongType,
             },
             .optional => |optional| switch (try self.peek_marker()) {
                 .Nil => {
-                    self.offset += 1;
+                    _ = try self.reader.takeByte();
                     return null;
                 },
                 else => try self.unpack_as(optional.child),
@@ -105,160 +105,60 @@ pub const Unpacker = struct {
         };
     }
 
-    fn unpack_float(
-        self: *Unpacker,
-        comptime float: Type.Float,
-        comptime As: type,
-    ) !As {
-        return switch (try self.peek_marker()) {
+    fn unpack_float(self: *Unpacker, comptime float: Type.Float, comptime As: type) !As {
+        return switch (try self.take_marker()) {
             .Float_32 => if (float.bits >= 32) {
-                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                const value = @as(
-                    As,
-                    @floatCast(
-                        @as(f32, @bitCast(std.mem.readVarInt(
-                            u32,
-                            self.buffer[self.offset + 1 .. self.offset + 5],
-                            Endian.big,
-                        ))),
-                    ),
-                );
-                self.offset += 5;
+                const value = @as(As, @floatCast(@as(f32, @bitCast(try self.reader.takeInt(u32, Endian.big)))));
                 return value;
             } else DeserializeError.TypeTooSmall,
             .Float_64 => if (float.bits >= 64) {
-                if (self.buffer.len - self.offset < 9) return DeserializeError.Finished;
-                const value = @as(
-                    As,
-                    @floatCast(
-                        @as(f64, @bitCast(std.mem.readVarInt(
-                            u64,
-                            self.buffer[self.offset +
-                                1 .. self.offset + 9],
-                            Endian.big,
-                        ))),
-                    ),
-                );
-                self.offset += 9;
+                const value = @as(As, @floatCast(@as(f64, @bitCast(try self.reader.takeInt(u64, Endian.big)))));
                 return value;
             } else DeserializeError.TypeTooSmall,
             else => DeserializeError.WrongType,
         };
     }
 
-    fn unpack_int(
-        self: *Unpacker,
-        comptime int: Type.Int,
-        comptime As: type,
-    ) !As {
+    fn unpack_int(self: *Unpacker, comptime int: Type.Int, comptime As: type) !As {
         return switch (int.signedness) {
-            .unsigned => switch (try self.peek_marker()) {
+            .unsigned => switch (try self.take_marker()) {
                 .Uint_64 => if (int.bits >= 64) {
-                    if (self.buffer.len - self.offset < 9) return DeserializeError.Finished;
-                    const value = std.mem.readVarInt(
-                        As,
-                        self.buffer[self.offset + 1 .. self.offset + 9],
-                        Endian.big,
-                    );
-                    self.offset += 9;
-                    return value;
+                    return try self.reader.takeVarInt(As, Endian.big, 8);
                 } else DeserializeError.TypeTooSmall,
-
                 .Uint_32 => if (int.bits >= 32) {
-                    if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                    const value = std.mem.readVarInt(
-                        As,
-                        self.buffer[self.offset + 1 .. self.offset + 5],
-                        Endian.big,
-                    );
-                    self.offset += 5;
-                    return value;
+                    return try self.reader.takeVarInt(As, Endian.big, 4);
                 } else DeserializeError.TypeTooSmall,
-
                 .Uint_16 => if (int.bits >= 16) {
-                    if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                    const value = std.mem.readVarInt(
-                        As,
-                        self.buffer[self.offset + 1 .. self.offset + 3],
-                        Endian.big,
-                    );
-                    self.offset += 3;
-                    return value;
+                    return try self.reader.takeVarInt(As, Endian.big, 2);
                 } else DeserializeError.TypeTooSmall,
-
                 .Uint_8 => if (int.bits >= 8) {
-                    if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
-                    const value: As = @intCast(self.buffer[self.offset + 1]);
-                    self.offset += 2;
-                    return value;
+                    return try self.reader.takeVarInt(As, Endian.big, 1);
                 } else DeserializeError.TypeTooSmall,
-
-                else => {
-                    if (self.buffer[self.offset] & 0x80 != 0)
-                        return DeserializeError.WrongType;
-                    const value: As = @intCast(self.buffer[self.offset]);
-                    self.offset += 1;
-                    return value;
-                },
-            },
-            .signed => switch (try self.peek_marker()) {
-                .Uint_64, .Int_64 => if (int.bits >= 64) {
-                    if (self.buffer.len - self.offset < 9) return DeserializeError.Finished;
-                    const value = std.mem.readVarInt(
-                        As,
-                        self.buffer[self.offset + 1 .. self.offset + 9],
-                        Endian.big,
-                    );
-                    self.offset += 9;
-                    return value;
-                } else DeserializeError.TypeTooSmall,
-
-                .Uint_32, .Int_32 => if (int.bits >= 32) {
-                    if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                    const value = std.mem.readVarInt(
-                        As,
-                        self.buffer[self.offset + 1 .. self.offset + 5],
-                        Endian.big,
-                    );
-                    self.offset += 5;
-                    return value;
-                } else DeserializeError.TypeTooSmall,
-
-                .Uint_16, .Int_16 => if (int.bits >= 16) {
-                    if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                    const value = std.mem.readVarInt(
-                        As,
-                        self.buffer[self.offset + 1 .. self.offset + 3],
-                        Endian.big,
-                    );
-                    self.offset += 3;
-                    return value;
-                } else DeserializeError.TypeTooSmall,
-
-                .Uint_8 => if (int.bits > 8) {
-                    if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
-                    const value: As = @intCast(self.buffer[self.offset + 1]);
-                    self.offset += 2;
-                    return value;
-                } else DeserializeError.TypeTooSmall,
-
-                .Int_8 => if (int.bits >= 8) {
-                    if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
-                    const value: As = @intCast(
-                        @as(i8, @bitCast(self.buffer[self.offset + 1])),
-                    );
-                    self.offset += 2;
-                    return value;
-                } else DeserializeError.TypeTooSmall,
-
                 .FixPositive => |number| {
                     const value: As = @intCast(number);
-                    self.offset += 1;
+                    return value;
+                },
+                else => return DeserializeError.WrongType,
+            },
+            .signed => switch (try self.take_marker()) {
+                .Uint_64, .Int_64 => if (int.bits >= 64) {
+                    return try self.reader.takeVarInt(As, Endian.big, 8);
+                } else DeserializeError.TypeTooSmall,
+                .Uint_32, .Int_32 => if (int.bits >= 32) {
+                    return try self.reader.takeVarInt(As, Endian.big, 4);
+                } else DeserializeError.TypeTooSmall,
+                .Uint_16, .Int_16 => if (int.bits >= 16) {
+                    return try self.reader.takeVarInt(As, Endian.big, 2);
+                } else DeserializeError.TypeTooSmall,
+                .Uint_8, .Int_8 => if (int.bits >= 8) {
+                    return try self.reader.takeVarInt(As, Endian.big, 1);
+                } else DeserializeError.TypeTooSmall,
+                .FixPositive => |number| {
+                    const value: As = @intCast(number);
                     return value;
                 },
                 .FixNegative => |number| {
                     const value: As = @intCast(@as(i6, @bitCast(0b10_0000 | @as(u6, number))));
-                    self.offset += 1;
                     return value;
                 },
                 else => return DeserializeError.WrongType,
@@ -267,91 +167,45 @@ pub const Unpacker = struct {
     }
 
     fn unpack_string(self: *Unpacker, comptime As: type) !As {
-        const len: usize = switch (try self.peek_marker()) {
-            .Bin_32, .Str_32 => blk: {
-                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    usize,
-                    self.buffer[self.offset + 1 .. self.offset + 5],
-                    Endian.big,
-                );
-                self.offset += 5;
-                break :blk len;
-            },
-            .Bin_16, .Str_16 => blk: {
-                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    usize,
-                    self.buffer[self.offset + 1 .. self.offset + 3],
-                    Endian.big,
-                );
-                self.offset += 3;
-                break :blk len;
-            },
-            .Bin_8, .Str_8 => blk: {
-                if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
-                const len: usize = @intCast(self.buffer[self.offset + 1]);
-                self.offset += 2;
-                break :blk len;
-            },
-            .FixStr => |len| blk: {
-                self.offset += 1;
-                break :blk len;
-            },
+        const len: usize = switch (try self.take_marker()) {
+            .Bin_32, .Str_32 => @intCast(self.reader.takeInt(u32, Endian.big) catch return DeserializeError.Finished),
+            .Bin_16, .Str_16 => @intCast(self.reader.takeInt(u16, Endian.big) catch return DeserializeError.Finished),
+            .Bin_8, .Str_8 => self.reader.takeByte() catch return DeserializeError.Finished,
+            .FixStr => |fix_len| fix_len,
             else => return DeserializeError.WrongType,
         };
-        // Bounds check: ensure the declared length doesn't exceed
-        // the remaining buffer.
-        if (len > self.buffer.len - self.offset) return DeserializeError.Finished;
         const str = try self.allocator.alloc(u8, len);
-        @memcpy(str, self.buffer[self.offset .. self.offset + len]);
-        self.offset += len;
+        errdefer self.allocator.free(str);
+        self.reader.readSliceAll(str) catch return DeserializeError.Finished;
         return @as(As, str);
     }
 
-    fn unpack_array(
-        self: *Unpacker,
-        comptime target_len: ?usize,
-        comptime As: type,
-    ) !As {
+    fn unpack_array(self: *Unpacker, comptime target_len: ?usize, comptime As: type) !As {
         const info = @typeInfo(As);
         var array: As = undefined;
-        switch (try self.peek_marker()) {
+        switch (try self.take_marker()) {
             .FixArray => |len| {
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
                 } else {
                     array = try self.allocator.alloc(info.pointer.child, len);
                 }
-                self.offset += 1;
             },
             .Array_16 => {
-                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u16,
-                    self.buffer[self.offset + 1 .. self.offset + 3],
-                    Endian.big,
-                );
+                const len = try self.reader.takeInt(u16, Endian.big);
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
                 } else {
                     array = try self.allocator.alloc(info.pointer.child, len);
                 }
-                self.offset += 3;
             },
             .Array_32 => {
-                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u32,
-                    self.buffer[self.offset + 1 .. self.offset + 5],
-                    Endian.big,
-                );
+                const len = try self.reader.takeInt(u32, Endian.big);
                 if (target_len != null) {
                     if (target_len.? != len) return DeserializeError.WrongArrayLength;
                 } else {
                     array = try self.allocator.alloc(info.pointer.child, len);
                 }
-                self.offset += 5;
             },
             else => return DeserializeError.WrongType,
         }
@@ -363,31 +217,10 @@ pub const Unpacker = struct {
 
     fn unpack_map(self: *Unpacker, comptime As: type) !As {
         var map: As = .empty;
-        const len = switch (try self.peek_marker()) {
-            .FixMap => |len| blk: {
-                self.offset += 1;
-                break :blk len;
-            },
-            .Map_16 => blk: {
-                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u16,
-                    self.buffer[self.offset + 1 .. self.offset + 3],
-                    Endian.big,
-                );
-                self.offset += 3;
-                break :blk len;
-            },
-            .Map_32 => blk: {
-                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u32,
-                    self.buffer[self.offset + 1 .. self.offset + 5],
-                    Endian.big,
-                );
-                self.offset += 5;
-                break :blk len;
-            },
+        const len = switch (try self.take_marker()) {
+            .FixMap => |fix_len| fix_len,
+            .Map_16 => try self.reader.takeInt(u16, Endian.big),
+            .Map_32 => try self.reader.takeInt(u32, Endian.big),
             else => return DeserializeError.WrongType,
         };
         try map.ensureTotalCapacity(self.allocator, len);
@@ -406,79 +239,28 @@ pub const Unpacker = struct {
         if (!@hasDecl(msgpack_decl, "repr")) {
             @compileError(std.fmt.comptimePrint(
                 \\Missing the repr declaration in your `__msgpack__` declaration.
-                \\Please add a `repr` declaration to your `__msgpack__` struct with type `msgpack.Repr`:
-                \\Suggested:
-                \\```
-                \\    const {} = struct {{
-                \\        ...
-                \\        pub const __msgpack__ = struct {{
-                \\            pub const repr = msgpack.Repr.map
-                \\        }};
-                \\    }}
-                \\```
             , .{ .a = As }));
         }
         return switch (msgpack_decl.repr) {
             .ext => |ext| blk: {
                 if (!@hasDecl(msgpack_decl, "unpack_ext")) {
-                    @compileError(std.fmt.comptimePrint(
-                        \\Missing the unpack_ext function in your `__msgpack__` declaration.
-                        \\Please add an unpack_ext function to your `__msgpack__` struct:
-                        \\Suggested:
-                        \\```
-                        \\    const {} = struct {{
-                        \\        ...
-                        \\        pub const __msgpack__ = struct {{
-                        \\            pub const repr = msgpack.Repr{{ .ext = type_id }};
-                        \\            pub fn unpack_ext(alloc: std.mem.Allocator, buf: []u8) !{} {{...}}
-                        \\        }};
-                        \\    }}
-                        \\```
-                        \\Note: unpack_ext must be marked pub.
-                    , .{ .a = As, .b = As }));
+                    @compileError(std.fmt.comptimePrint("Missing unpack_ext function.", .{}));
                 }
-                break :blk self.unpack_ext(
-                    As,
-                    ext,
-                    msgpack_decl.unpack_ext,
-                );
+                break :blk self.unpack_ext(As, ext, msgpack_decl.unpack_ext);
             },
             .map => unpack_map_as_struct(self, As),
         };
     }
 
     fn unpack_map_as_struct(self: *Unpacker, comptime As: type) !As {
-        const len = switch (try self.peek_marker()) {
-            .FixMap => |len| blk: {
-                self.offset += 1;
-                break :blk len;
-            },
-            .Map_16 => blk: {
-                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u16,
-                    self.buffer[self.offset + 1 .. self.offset + 3],
-                    Endian.big,
-                );
-                self.offset += 3;
-                break :blk len;
-            },
-            .Map_32 => blk: {
-                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u32,
-                    self.buffer[self.offset + 1 .. self.offset + 5],
-                    Endian.big,
-                );
-                self.offset += 5;
-                break :blk len;
-            },
+        const len = switch (try self.take_marker()) {
+            .FixMap => |fix_len| fix_len,
+            .Map_16 => try self.reader.takeInt(u16, Endian.big),
+            .Map_32 => try self.reader.takeInt(u32, Endian.big),
             else => return DeserializeError.WrongType,
         };
         const fields = @typeInfo(As).@"struct".fields;
-        if (len != fields.len) {
-            return DeserializeError.WrongFields;
-        }
+        if (len != fields.len) return DeserializeError.WrongFields;
         var fields_to_fill = std.BufSet.init(self.allocator);
         defer fields_to_fill.deinit();
         inline for (fields) |field| {
@@ -488,9 +270,7 @@ pub const Unpacker = struct {
         for (0..len) |_| {
             const key = try self.unpack_as([]const u8);
             defer self.allocator.free(key);
-            if (!fields_to_fill.contains(key)) {
-                return DeserializeError.WrongFields;
-            }
+            if (!fields_to_fill.contains(key)) return DeserializeError.WrongFields;
             fields_to_fill.remove(key);
             inline for (fields) |field| {
                 if (std.mem.eql(u8, key, field.name)) {
@@ -502,72 +282,38 @@ pub const Unpacker = struct {
         return out;
     }
 
-    fn unpack_ext(
-        self: *Unpacker,
-        comptime As: type,
-        comptime type_id: i8,
-        comptime callback: anytype,
-    ) !As {
+    fn unpack_ext(self: *Unpacker, comptime As: type, comptime type_id: i8, comptime callback: anytype) !As {
         const metadata = try self.ext_decode();
-        if (metadata.type_id != type_id) {
-            return DeserializeError.WrongExtType;
-        }
+        if (metadata.type_id != type_id) return DeserializeError.WrongExtType;
         const slice = try self.allocator.alloc(u8, metadata.len);
-        @memcpy(
-            slice,
-            self.buffer[self.offset .. self.offset + metadata.len],
-        );
+        // Ownership of `slice` transfers to `callback`, which frees it on its
+        // own error path — so only free here if the read itself fails.
+        self.reader.readSliceAll(slice) catch |e| {
+            self.allocator.free(slice);
+            return switch (e) {
+                error.EndOfStream => DeserializeError.Finished,
+                else => e,
+            };
+        };
         return callback(self.allocator, slice);
     }
 
-    const ExtMetadata = struct {
-        type_id: i8,
-        len: usize,
-    };
+    const ExtMetadata = struct { type_id: i8, len: usize };
 
     fn ext_decode(self: *Unpacker) !ExtMetadata {
-        const mark = try self.peek_marker();
-        self.offset += 1;
+        const mark = try self.take_marker();
         const len: usize = switch (mark) {
             .FixExt_1 => 1,
             .FixExt_2 => 2,
             .FixExt_4 => 4,
             .FixExt_8 => 8,
             .FixExt_16 => 16,
-            .Ext_8 => blk: {
-                if (self.buffer.len - self.offset < 2) return DeserializeError.Finished;
-                const len = self.buffer[self.offset];
-                self.offset += 1;
-                break :blk len;
-            },
-            .Ext_16 => blk: {
-                if (self.buffer.len - self.offset < 3) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u16,
-                    self.buffer[self.offset .. self.offset + 2],
-                    Endian.big,
-                );
-                self.offset += 2;
-                break :blk len;
-            },
-            .Ext_32 => blk: {
-                if (self.buffer.len - self.offset < 5) return DeserializeError.Finished;
-                const len = std.mem.readVarInt(
-                    u32,
-                    self.buffer[self.offset .. self.offset + 4],
-                    Endian.big,
-                );
-                self.offset += 4;
-                break :blk len;
-            },
+            .Ext_8 => try self.reader.takeByte(),
+            .Ext_16 => try self.reader.takeInt(u16, Endian.big),
+            .Ext_32 => try self.reader.takeInt(u32, Endian.big),
             else => return DeserializeError.WrongType,
         };
-        if (self.buffer.len - self.offset < 1) return DeserializeError.Finished;
-        const type_id: i8 = @bitCast(self.buffer[self.offset]);
-        self.offset += 1;
-        return ExtMetadata{
-            .type_id = type_id,
-            .len = len,
-        };
+        const type_id: i8 = @bitCast(try self.reader.takeByte());
+        return ExtMetadata{ .type_id = type_id, .len = len };
     }
 };

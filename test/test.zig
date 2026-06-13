@@ -5,103 +5,79 @@ const testing = std.testing;
 const msgpack = @import("msgpack");
 
 test "u7 round-trip" {
-    var packer_ = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer_ = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val: u7 = 0x7F;
     try packer_.pack(val);
-    const packed_message = packer_.finish();
-    defer testing.allocator.free(packed_message);
+    packer_.finish();
 
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        packed_message,
-        0,
-    );
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     try testing.expectEqual(val, try message.unpack_as(u7));
 }
 
 test "i8 round-trip" {
-    var packer_ = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer_ = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val: i8 = 0x7F;
     try packer_.pack(val);
-    const packed_message = packer_.finish();
-    defer testing.allocator.free(packed_message);
+    packer_.finish();
 
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        packed_message,
-        0,
-    );
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     try testing.expectEqual(val, try message.unpack_as(i8));
 }
 
 test "null round-trip" {
-    var packer_ = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer_ = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val: ?i8 = null;
     try packer_.pack(val);
-    const packed_message = packer_.finish();
-    defer testing.allocator.free(packed_message);
+    packer_.finish();
 
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        packed_message,
-        0,
-    );
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     try testing.expectEqual(val, try message.unpack_as(?i8));
 }
 
 test "optional bool round-trip" {
-    var packer_ = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer_ = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val: ?bool = true;
     try packer_.pack(val);
-    const packed_message = packer_.finish();
-    defer testing.allocator.free(packed_message);
+    packer_.finish();
 
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        packed_message,
-        0,
-    );
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     try testing.expectEqual(val, try message.unpack_as(?bool));
 }
 
 test "float round-trip" {
-    var packer_ = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer_ = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val: f32 = @bitCast(@as(u32, 0xDEADBEEF));
     try packer_.pack(val);
-    const packed_message = packer_.finish();
-    defer testing.allocator.free(packed_message);
+    packer_.finish();
 
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        packed_message,
-        0,
-    );
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     try testing.expectEqual(val, try message.unpack_as(f32));
 }
 
 test "32-bit length bin round_trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val = "t" ** 0x0001_0000;
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as([]const u8);
     defer testing.allocator.free(unpacked);
     try testing.expectEqualStrings(
@@ -111,18 +87,14 @@ test "32-bit length bin round_trip" {
 }
 
 test "32-bit length string round_trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val = "t" ** 0x0001_0000;
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as([]const u8);
     defer testing.allocator.free(unpacked);
     try testing.expectEqualStrings(
@@ -132,19 +104,15 @@ test "32-bit length string round_trip" {
 }
 
 test "32-bit length array round_trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const len = 0x00_01_00_00;
     const val: [len]u32 = .{0xDEADBEEF} ** len;
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as([len]u32);
     try testing.expectEqualDeep(
         val,
@@ -153,19 +121,15 @@ test "32-bit length array round_trip" {
 }
 
 test "32-bit length slice round_trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const len = 0x00_01_00_00;
     const val: [len]u32 = .{0xDEADBEEF} ** len;
     try packer.pack(val[0..len]);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as([]u32);
     defer testing.allocator.free(unpacked);
     try testing.expectEqualDeep(
@@ -175,9 +139,9 @@ test "32-bit length slice round_trip" {
 }
 
 test "16-bit length map round-trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const len = 0b0001_0000;
     var val: std.array_hash_map.Auto(u32, u32) = .empty;
     defer val.deinit(testing.allocator);
@@ -185,13 +149,9 @@ test "16-bit length map round-trip" {
         try val.put(testing.allocator, @intCast(i), 0xDEADBEEF);
     }
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     var unpacked = try message.unpack_as(std.array_hash_map.Auto(u32, u32));
     defer unpacked.deinit(testing.allocator);
     try testing.expectEqualDeep(
@@ -205,9 +165,9 @@ test "16-bit length map round-trip" {
 }
 
 test "32-bit length map round-trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const len = 0x00_01_00_00;
     var val: std.array_hash_map.Auto(u32, u32) = .empty;
     defer val.deinit(testing.allocator);
@@ -215,13 +175,9 @@ test "32-bit length map round-trip" {
         try val.put(testing.allocator, @intCast(i), 0xDEADBEEF);
     }
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     var unpacked = try message.unpack_as(std.array_hash_map.Auto(u32, u32));
     defer unpacked.deinit(testing.allocator);
     try testing.expectEqualDeep(
@@ -269,20 +225,16 @@ const MyType = struct {
 };
 
 test "32-bit length ext round-trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const len = 0x00_01_00_00;
     const content = ("\xDE" ** len);
     const val = MyType{ .buf = content };
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as(MyType);
     defer testing.allocator.free(unpacked.buf);
     try testing.expectEqualDeep(
@@ -292,21 +244,17 @@ test "32-bit length ext round-trip" {
 }
 
 test "timestamp 32 round-trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val = msgpack.Timestamp{
         .seconds = 0xDEADBEEF,
         .nanoseconds = 0,
     };
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as(msgpack.Timestamp);
     try testing.expectEqualDeep(
         val,
@@ -315,21 +263,17 @@ test "timestamp 32 round-trip" {
 }
 
 test "timestamp 64 round-trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val = msgpack.Timestamp{
         .seconds = 0xDEADBEEF,
         .nanoseconds = 1,
     };
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as(msgpack.Timestamp);
     try testing.expectEqualDeep(
         val,
@@ -347,22 +291,18 @@ const MyStruct = struct {
 };
 
 test "object as map round-trip" {
-    var packer = try msgpack.Packer.init(
-        testing.allocator,
-    );
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
     const val = MyStruct{
         .@"1 2 3 weird $name" = 2,
         .a = 0xDEADBEEF,
         .b = "Hello!",
     };
     try packer.pack(val);
-    const buffer = packer.finish();
-    defer testing.allocator.free(buffer);
-    var message = try msgpack.Unpacker.init(
-        testing.allocator,
-        buffer,
-        0,
-    );
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
     const unpacked = try message.unpack_as(MyStruct);
     defer testing.allocator.free(unpacked.b);
     try testing.expectEqualDeep(
