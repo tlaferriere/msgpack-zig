@@ -281,6 +281,9 @@ pub const Unpacker = struct {
             },
             else => return DeserializeError.WrongType,
         };
+        // Bounds check: ensure the declared length doesn't exceed
+        // the remaining buffer.
+        if (len > self.buffer.len - self.offset) return DeserializeError.Finished;
         const str = try self.allocator.alloc(u8, len);
         @memcpy(str, self.buffer[self.offset .. self.offset + len]);
         self.offset += len;
