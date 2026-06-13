@@ -738,3 +738,36 @@ test "Deserialize Timestamp 96" {
         unpacked,
     );
 }
+
+test "OOB: string with length exceeding buffer" {
+    // A single byte 0xa1 = FixStr with declared length 1.
+    // The unpacker advances offset to 1, then tries to @memcpy
+    // buffer[1..2] — but the buffer is only 1 byte.
+    // Before the fix, this panics with index-out-of-bounds.
+    // After the fix, it returns DeserializeError.Finished.
+    var message = try Unpacker.init(testing.allocator, "\xa1", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Str8 with bogus length" {
+    // Str8 marker (0xd9) + length byte 0xff = 255-byte string,
+    // but only 2 bytes of input total.
+    var message = try Unpacker.init(testing.allocator, "\xd9\xff", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "OOB: Str32 with huge length" {
+    // Str32 marker (0xdb) + 4-byte big-endian length 0x0000ffff = 65535,
+    // but only 5 bytes of input total.
+    var message = try Unpacker.init(testing.allocator, "\xdb\x00\x00\xff\xff", 0);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
