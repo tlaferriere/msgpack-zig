@@ -1,0 +1,66 @@
+name: Fuzz
+on:
+  schedule:
+    - cron: '0 3 * * *'      # nightly 03:00 UTC
+  workflow_dispatch:
+    inputs:
+      iterations:
+        description: 'Fuzz iterations per test (--fuzz=N)'
+        default: '288000'
+jobs:
+  fuzz:
+    runs-on: ubuntu-latest
+    # Runner rate measured ~20 iters/s, so 288k iterations is ~4h. The backstop
+    # absorbs rate variance and reds the job if the runner stalls, while staying
+    # under the 6h per-job cap.
+    timeout-minutes: 320
+    steps:
+      - uses: actions/checkout@v4
+      # Disable setup-zig's own cache: it redirects Zig's cache dir to
+      # ./.zig-cache and caches the whole thing, which races with our dedicated
+      # corpus cache below over .zig-cache/{f,v}. We own that persistence
+      # explicitly instead so it is deterministic.
+      - uses: mlugg/setup-zig@v2
+        with:
+          use-cache: false
+
+      - name: Restore fuzz corpus
+        uses: actions/cache@v4
+        with:
+          # The fuzz corpus (input seeds) lives under .zig-cache/f and the
+          # coverage bitmap + run counters under .zig-cache/v, both keyed
+          # internally by the instrumented binary's pc_digest. Persisting both
+          # compounds the corpus across runs. GitHub caches are immutable, so
+          # save under a unique key each run and read the newest via the shared
+          # prefix (the standard "always update the cache" pattern).
+          path: |
+            .zig-cache/f
+            .zig-cache/v
+          key: fuzz-corpus-${{ github.run_id }}
+          restore-keys: fuzz-corpus-
+
+      - name: Run continuous fuzzing
+        env:
+          ITERATIONS: ${{ github.event.inputs.iterations || '288000' }}
+        # --fuzz=N runs N iterations per fuzz test then exits. A found crash is
+        # reported and its input saved to .zig-cache/f/crash, but the build's
+        # exit code stays 0 (zig 0.16 tallies step failures before the fuzz
+        # phase runs), so detect the crash artifact explicitly.
+        run: |
+          set +e
+          rm -f .zig-cache/f/crash
+          zig build test --release=safe --fuzz="$ITERATIONS"
+          ec=$?
+          if [ -f .zig-cache/f/crash ]; then
+            echo "::error::Fuzzer found a crash; reproduce with 'zig build test --release=safe --fuzz' using the saved input artifact"
+            exit 1
+          fi
+          exit "$ec"
+
+      - name: Upload crash input
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: fuzz-crash-input
+          path: .zig-cache/f/crash
+          if-no-files-found: ignore
