@@ -1,31 +1,46 @@
 name: Documentation
-on: [push]
+on:
+  push:
+    branches:
+      - '**'
+
+# Serialize gh-pages publishes so concurrent branch pushes don't race the
+# force-push to the gh-pages branch.
+concurrency:
+  group: gh-pages
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
 jobs:
-  build:
+  docs:
     runs-on: ubuntu-latest
-    name: Build Documentation and
+    name: Build and publish documentation
     steps:
-      - uses: actions/checkout@v3
+      - uses: actions/checkout@v4
       - uses: mlugg/setup-zig@v2
       - run: zig build docs
 
-      - name: Upload static files as artifact
-        id: deployment
-        uses: actions/upload-pages-artifact@v3
+      # Default branch: publish to the site root. keep_files preserves the
+      # per-branch preview subdirectories.
+      - name: Publish default-branch docs
+        if: github.ref_name == github.event.repository.default_branch
+        uses: peaceiris/actions-gh-pages@v4
         with:
-          path: zig-out/docs/
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./zig-out/docs
+          keep_files: true
 
-  # Deployment job
-  deploy:
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    runs-on: ubuntu-latest
-    permissions:
-      id-token: write
-      pages: write
-    needs: build
-    steps:
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
+      # Non-default branches: publish to branch/<branch-name>/ so each branch
+      # gets its own selectable sub-page instead of colliding with the root
+      # deployment (which previously failed the github-pages environment
+      # protection rule).
+      - name: Publish branch-preview docs
+        if: github.ref_name != github.event.repository.default_branch
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          publish_dir: ./zig-out/docs
+          destination_dir: branch/${{ github.ref_name }}
+          keep_files: true
