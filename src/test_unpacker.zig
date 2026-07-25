@@ -812,3 +812,12 @@ test "Leak: map with string keys truncated before its value" {
     var message = Unpacker.init(testing.allocator, &r);
     _ = message.unpack_as(std.array_hash_map.String(u32)) catch {};
 }
+
+// Same class of leak as the slice case, on the fixed-size path: the elements
+// unpacked before the failure were never released.
+test "Leak: fixed-size array truncated before its last element" {
+    // FixArray of 2 (0x92), one FixStr "a", then nothing.
+    var r = std.Io.Reader.fixed("\x92\xa1a");
+    var message = Unpacker.init(testing.allocator, &r);
+    _ = message.unpack_as([2][]const u8) catch {};
+}
