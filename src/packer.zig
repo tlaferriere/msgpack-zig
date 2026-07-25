@@ -347,7 +347,7 @@ pub const Packer = struct {
                 4 => Marker{ .FixExt_4 = 0 },
                 8 => Marker{ .FixExt_8 = 0 },
                 16 => Marker{ .FixExt_16 = 0 },
-                3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
+                0, 3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
                 maxInt(u8) + 1...maxInt(u16) => Marker{ .Ext_16 = 0 },
                 maxInt(u16) + 1...maxInt(u32) => Marker{ .Ext_32 = 0 },
                 else => unreachable,
