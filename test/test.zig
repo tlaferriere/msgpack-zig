@@ -377,3 +377,13 @@ test "object as map round-trip" {
         unpacked,
     );
 }
+
+// Found by fuzzing: a truncated map left the string fields already unpacked
+// into the result stranded.
+test "truncated object as map does not leak" {
+    // FixMap of 3 (0x83): "a" -> 1, "b" -> "x", then the input runs out before
+    // the third key.
+    var r = std.Io.Reader.fixed("\x83\xa1a\x01\xa1b\xa1x");
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    _ = message.unpack_as(MyStruct) catch {};
+}
