@@ -18,7 +18,10 @@ pub const Timestamp = struct {
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = -1 };
         pub fn pack_ext(self: Timestamp, alloc: std.mem.Allocator) ![]const u8 {
-            if (self.nanoseconds == 0 and self.seconds <= std.math.maxInt(u32)) {
+            if (self.nanoseconds == 0 and
+                self.seconds >= 0 and
+                self.seconds <= std.math.maxInt(u32))
+            {
                 const buf = try alloc.alloc(u8, 4);
                 std.mem.writeInt(
                     u32,
@@ -36,7 +39,7 @@ pub const Timestamp = struct {
                 return Error.TooManyNanoseconds;
             }
 
-            if (self.seconds <= std.math.maxInt(u34)) {
+            if (self.seconds >= 0 and self.seconds <= std.math.maxInt(u34)) {
                 const combined: u64 = (@as(u64, self.nanoseconds) << 34) |
                     @as(u64, @intCast(self.seconds));
                 const buf = try alloc.alloc(u8, 8);
@@ -75,7 +78,10 @@ pub const Timestamp = struct {
         }
 
         pub fn packed_size(self: Timestamp) !usize {
-            if (self.nanoseconds == 0 and self.seconds <= std.math.maxInt(u32)) {
+            if (self.nanoseconds == 0 and
+                self.seconds >= 0 and
+                self.seconds <= std.math.maxInt(u32))
+            {
                 return 4;
             }
 
@@ -83,7 +89,7 @@ pub const Timestamp = struct {
                 return Error.TooManyNanoseconds;
             }
 
-            if (self.seconds <= std.math.maxInt(u34)) {
+            if (self.seconds >= 0 and self.seconds <= std.math.maxInt(u34)) {
                 return 8;
             }
 
