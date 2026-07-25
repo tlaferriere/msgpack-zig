@@ -17,6 +17,9 @@ jobs:
 
   # Deployment job
   deploy:
+    # The github-pages environment is restricted to protected branches, so this
+    # job can only ever succeed on main.
+    if: github.ref == 'refs/heads/main'
     environment:
       name: github-pages
       url: ${{ steps.deployment.outputs.page_url }}
