@@ -304,6 +304,50 @@ test "timestamp 64 round-trip" {
     );
 }
 
+// Found by fuzzing: negative seconds satisfied the `seconds <= maxInt(u32)`
+// test guarding the 4-byte encoding, then panicked on the @intCast to u32.
+// Timestamps before 1970 must take the 12-byte encoding, which is the only one
+// with a signed seconds field.
+test "negative timestamp round-trip" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    const val = msgpack.Timestamp{
+        .seconds = -1,
+        .nanoseconds = 0,
+    };
+    try packer.pack(val);
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(msgpack.Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
+// Same bug on the 8-byte encoding: negative seconds are below maxInt(u34), so
+// they reached the @intCast to u64.
+test "negative timestamp with nanoseconds round-trip" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    const val = msgpack.Timestamp{
+        .seconds = -1234567890,
+        .nanoseconds = 500,
+    };
+    try packer.pack(val);
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(msgpack.Timestamp);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
 const MyStruct = struct {
     a: u32,
     b: []const u8,
