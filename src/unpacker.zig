@@ -299,14 +299,21 @@ pub const Unpacker = struct {
             try fields_to_fill.insert(field.name);
         }
         var out = std.mem.zeroes(As);
+        // A field is filled once it leaves `fields_to_fill`; on failure every
+        // filled field has to give back whatever it allocated.
+        errdefer inline for (fields) |field| {
+            if (!fields_to_fill.contains(field.name)) {
+                self.free_unpacked(@field(out, field.name));
+            }
+        };
         for (0..len) |_| {
             const key = try self.unpack_as([]const u8);
             defer self.allocator.free(key);
             if (!fields_to_fill.contains(key)) return DeserializeError.WrongFields;
-            fields_to_fill.remove(key);
             inline for (fields) |field| {
                 if (std.mem.eql(u8, key, field.name)) {
                     @field(out, field.name) = try self.unpack_as(field.type);
+                    fields_to_fill.remove(field.name);
                     break;
                 }
             }
