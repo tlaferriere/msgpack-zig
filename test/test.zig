@@ -243,6 +243,26 @@ test "32-bit length ext round-trip" {
     );
 }
 
+// Found by fuzzing: an ext payload of length 0 fell through every arm of the
+// marker switch in `write_ext` and hit `unreachable`. Zero is a valid ext 8
+// length.
+test "empty ext round-trip" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    const val = MyType{ .buf = "" };
+    try packer.pack(val);
+    packer.finish();
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
 test "timestamp 32 round-trip" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
