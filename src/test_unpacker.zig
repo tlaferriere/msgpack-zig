@@ -851,3 +851,20 @@ test "OOB: empty buffer" {
     var message = Unpacker.init(testing.allocator, &r);
     _ = message.unpack_as(u8) catch {};
 }
+
+// Found by fuzzing: `unpack_array` allocated the element buffer, then let a
+// failing element read propagate without freeing it.
+test "Leak: array truncated before its last element" {
+    // FixArray of 2 (0x92) but only one element follows.
+    var r = std.Io.Reader.fixed("\x92\x01");
+    var message = Unpacker.init(testing.allocator, &r);
+    _ = message.unpack_as([]u32) catch {};
+}
+
+test "Leak: array of strings truncated before its last element" {
+    // FixArray of 2 (0x92), one FixStr "a", then nothing: the outer buffer and
+    // the already-unpacked string both leaked.
+    var r = std.Io.Reader.fixed("\x92\xa1a");
+    var message = Unpacker.init(testing.allocator, &r);
+    _ = message.unpack_as([][]const u8) catch {};
+}
