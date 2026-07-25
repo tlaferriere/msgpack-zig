@@ -191,6 +191,78 @@ test "Deserialize signed TypeTooSmall" {
     );
 }
 
+// Found by fuzzing: whether a value fits was decided from the width of the
+// encoding rather than from the value, so a small uint64 was rejected for any
+// target narrower than 64 bits.
+test "Deserialize u33 from uint64" {
+    var r = std.Io.Reader.fixed("\xcf\x00\x00\x00\x01\x00\x00\x00\x01");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectEqual(
+        0x1_00000001,
+        try message.unpack_as(u33),
+    );
+}
+
+test "Deserialize i63 from uint64" {
+    var r = std.Io.Reader.fixed("\xcf\x00\x00\x00\x01\x00\x00\x00\x01");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectEqual(
+        0x1_00000001,
+        try message.unpack_as(i63),
+    );
+}
+
+// Same root cause, opposite direction: a negative int8 widened into an i64 was
+// read as an unsigned byte, silently turning -17 into 239.
+test "Deserialize i64 from int8" {
+    var r = std.Io.Reader.fixed("\xd0\xEF");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectEqual(
+        -17,
+        try message.unpack_as(i64),
+    );
+}
+
+test "Deserialize i64 from int16" {
+    var r = std.Io.Reader.fixed("\xd1\xBE\xEF");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectEqual(
+        -16657,
+        try message.unpack_as(i64),
+    );
+}
+
+// A uint64 past maxInt(i64) was reinterpreted as a negative i64 instead of
+// being reported as too large.
+test "Deserialize i64 from uint64 out of range" {
+    var r = std.Io.Reader.fixed("\xcf\xFF\xFF\xFF\xFF\xFF\xFF\xFF\xFF");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        DeserializeError.TypeTooSmall,
+        message.unpack_as(i64),
+    );
+}
+
+// A positive fixint always fits the marker, but not necessarily the target
+// type: the @intCast panicked instead of reporting TypeTooSmall.
+test "Deserialize u1 from positive fixint out of range" {
+    var r = std.Io.Reader.fixed("\x7F");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        DeserializeError.TypeTooSmall,
+        message.unpack_as(u1),
+    );
+}
+
+test "Deserialize i2 from negative fixint out of range" {
+    var r = std.Io.Reader.fixed("\xEF");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        DeserializeError.TypeTooSmall,
+        message.unpack_as(i2),
+    );
+}
+
 test "Deserialize f64" {
     var r = std.Io.Reader.fixed("\xcb\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF");
     var message = Unpacker.init(testing.allocator, &r);
