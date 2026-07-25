@@ -248,13 +248,20 @@ pub const Unpacker = struct {
             .Map_32 => try self.reader.takeInt(u32, Endian.big),
             else => return DeserializeError.WrongType,
         };
+        // A truncated map must not strand the map itself, the entries read so
+        // far, or a key whose value never arrived.
+        errdefer {
+            for (map.keys()) |key| self.free_unpacked(key);
+            for (map.values()) |value| self.free_unpacked(value);
+            map.deinit(self.allocator);
+        }
         try map.ensureTotalCapacity(self.allocator, len);
         for (0..len) |_| {
-            try map.put(
-                self.allocator,
-                try self.unpack_as(@TypeOf(@as(As.KV, undefined).key)),
-                try self.unpack_as(@TypeOf(@as(As.KV, undefined).value)),
-            );
+            const key = try self.unpack_as(@TypeOf(@as(As.KV, undefined).key));
+            errdefer self.free_unpacked(key);
+            const value = try self.unpack_as(@TypeOf(@as(As.KV, undefined).value));
+            errdefer self.free_unpacked(value);
+            try map.put(self.allocator, key, value);
         }
         return map;
     }
