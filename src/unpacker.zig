@@ -208,10 +208,10 @@ pub const Unpacker = struct {
         // A failing element read must not strand the buffer, nor the elements
         // unpacked into it so far.
         var unpacked: usize = 0;
-        errdefer if (info != .array) {
+        errdefer {
             for (array[0..unpacked]) |element| self.free_unpacked(element);
-            self.allocator.free(array);
-        };
+            if (info != .array) self.allocator.free(array);
+        }
         for (if (info == .array) &array else array) |*element| {
             element.* = try self.unpack_as(@TypeOf(element.*));
             unpacked += 1;
