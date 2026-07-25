@@ -265,6 +265,29 @@ test "Serialize i128 to uint64" {
     try testing.expectEqualStrings("\xd3\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
 }
 
+// Found by fuzzing: a signed value that fits the unsigned encoding of a width
+// but not the signed one picked the uint marker while still writing through the
+// signed type of that width, panicking on the @intCast.
+test "Serialize i9 to uint8" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    const val: i9 = 200;
+    try packer.pack(val);
+    const actual = aw.written();
+    try testing.expectEqualStrings("\xcc\xc8", actual);
+}
+
+test "Serialize i17 to uint16" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    const val: i17 = 40000;
+    try packer.pack(val);
+    const actual = aw.written();
+    try testing.expectEqualStrings("\xcd\x9C\x40", actual);
+}
+
 test "Serialize error IntTooLarge with int" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
