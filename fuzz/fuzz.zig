@@ -157,11 +157,21 @@ test "fuzz unpack arrays" {
                 if (input.len == 0) return;
 
                 // Fixed-size array: length is checked against the marker, so
-                // nothing is allocated.
+                // nothing is allocated for the array itself.
                 {
                     var r = std.Io.Reader.fixed(input);
                     var u = Unpacker.init(testing.allocator, &r);
                     _ = u.unpack_as([3]u8) catch {};
+                }
+
+                // Fixed-size array of strings: no outer allocation, but one per
+                // element.
+                {
+                    var r = std.Io.Reader.fixed(input);
+                    var u = Unpacker.init(testing.allocator, &r);
+                    if (u.unpack_as([2][]const u8)) |array| {
+                        for (array) |inner| testing.allocator.free(inner);
+                    } else |_| {}
                 }
 
                 // Slices of scalars: one allocation, freed on success.
