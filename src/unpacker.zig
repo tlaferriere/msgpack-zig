@@ -209,10 +209,35 @@ pub const Unpacker = struct {
             },
             else => return DeserializeError.WrongType,
         }
+        // A failing element read must not strand the buffer, nor the elements
+        // unpacked into it so far.
+        var unpacked: usize = 0;
+        errdefer if (info != .array) {
+            for (array[0..unpacked]) |element| self.free_unpacked(element);
+            self.allocator.free(array);
+        };
         for (if (info == .array) &array else array) |*element| {
             element.* = try self.unpack_as(@TypeOf(element.*));
+            unpacked += 1;
         }
         return array;
+    }
+
+    /// Release whatever `unpack_as` allocated for a value it returned.
+    /// Types that own nothing are left alone.
+    fn free_unpacked(self: *Unpacker, value: anytype) void {
+        switch (@typeInfo(@TypeOf(value))) {
+            .pointer => |pointer| switch (pointer.size) {
+                .slice => {
+                    for (value) |element| self.free_unpacked(element);
+                    self.allocator.free(value);
+                },
+                else => {},
+            },
+            .array => for (value) |element| self.free_unpacked(element),
+            .optional => if (value) |inner| self.free_unpacked(inner),
+            else => {},
+        }
     }
 
     fn unpack_map(self: *Unpacker, comptime As: type) !As {
