@@ -142,19 +142,21 @@ pub const Packer = struct {
             const i = @Int(.signed, byte_count * 8);
             const u = @Int(.unsigned, byte_count * 8);
             if (std.math.minInt(i) <= value and value <= maxInt(u)) {
-                comptime var type_info = @typeInfo(T);
-                type_info.int.bits = byte_count * 8;
-                const OutType = @Int(type_info.int.signedness, type_info.int.bits);
+                // A signed value too large for the signed encoding of this
+                // width still fits the unsigned one, so pick the output type
+                // from the marker rather than from T's signedness.
+                const fits_signed = @typeInfo(T).int.signedness == .signed and value <= maxInt(i);
 
                 try self.writer.writeByte(marker.encode(
-                    if (type_info.int.signedness == .signed and value <= maxInt(OutType))
-                        mark.signed
-                    else
-                        mark.unsigned,
+                    if (fits_signed) mark.signed else mark.unsigned,
                 ));
 
                 var int_buf: [8]u8 = undefined;
-                std.mem.writeInt(OutType, int_buf[0..@sizeOf(OutType)], @intCast(value), Endian.big);
+                if (fits_signed) {
+                    std.mem.writeInt(i, int_buf[0..@sizeOf(i)], @intCast(value), Endian.big);
+                } else {
+                    std.mem.writeInt(u, int_buf[0..@sizeOf(u)], @intCast(value), Endian.big);
+                }
                 try self.writer.writeAll(int_buf[0..byte_count]);
                 return;
             }
