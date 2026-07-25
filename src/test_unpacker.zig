@@ -796,3 +796,19 @@ test "Leak: array of strings truncated before its last element" {
     var message = Unpacker.init(testing.allocator, &r);
     _ = message.unpack_as([][]const u8) catch {};
 }
+
+// Found by fuzzing: `unpack_map` reserved capacity, then let a failing entry
+// read propagate, stranding the map's own allocation.
+test "Leak: map truncated before its value" {
+    // FixMap of 1 (0x81) with a key but no value.
+    var r = std.Io.Reader.fixed("\x81\x01");
+    var message = Unpacker.init(testing.allocator, &r);
+    _ = message.unpack_as(std.array_hash_map.Auto(u32, u32)) catch {};
+}
+
+test "Leak: map with string keys truncated before its value" {
+    // Same, but the key allocation leaked too since it never reached the map.
+    var r = std.Io.Reader.fixed("\x81\xa1a");
+    var message = Unpacker.init(testing.allocator, &r);
+    _ = message.unpack_as(std.array_hash_map.String(u32)) catch {};
+}
