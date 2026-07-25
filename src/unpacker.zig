@@ -119,49 +119,45 @@ pub const Unpacker = struct {
         };
     }
 
+    /// Read one `Encoded` from the stream, then narrow to `As`.
+    ///
+    /// `Encoded` must match the width and signedness of the msgpack encoding,
+    /// so that the bytes are interpreted with the right sign, and whether the
+    /// value fits `As` is decided from the value rather than from the width of
+    /// the encoding. How many bytes to read follows from `Encoded`, which is
+    /// what `takeInt` derives it from.
+    fn take_int(self: *Unpacker, comptime As: type, comptime Encoded: type) !As {
+        const value = try self.reader.takeInt(Encoded, Endian.big);
+        return std.math.cast(As, value) orelse DeserializeError.TypeTooSmall;
+    }
+
     fn unpack_int(self: *Unpacker, comptime int: Type.Int, comptime As: type) !As {
         return switch (int.signedness) {
             .unsigned => switch (try self.take_marker()) {
-                .Uint_64 => if (int.bits >= 64) {
-                    return try self.reader.takeVarInt(As, Endian.big, 8);
-                } else DeserializeError.TypeTooSmall,
-                .Uint_32 => if (int.bits >= 32) {
-                    return try self.reader.takeVarInt(As, Endian.big, 4);
-                } else DeserializeError.TypeTooSmall,
-                .Uint_16 => if (int.bits >= 16) {
-                    return try self.reader.takeVarInt(As, Endian.big, 2);
-                } else DeserializeError.TypeTooSmall,
-                .Uint_8 => if (int.bits >= 8) {
-                    return try self.reader.takeVarInt(As, Endian.big, 1);
-                } else DeserializeError.TypeTooSmall,
-                .FixPositive => |number| {
-                    const value: As = @intCast(number);
-                    return value;
-                },
-                else => return DeserializeError.WrongType,
+                .Uint_64 => self.take_int(As, u64),
+                .Uint_32 => self.take_int(As, u32),
+                .Uint_16 => self.take_int(As, u16),
+                .Uint_8 => self.take_int(As, u8),
+                .FixPositive => |number| std.math.cast(As, number) orelse
+                    DeserializeError.TypeTooSmall,
+                else => DeserializeError.WrongType,
             },
             .signed => switch (try self.take_marker()) {
-                .Uint_64, .Int_64 => if (int.bits >= 64) {
-                    return try self.reader.takeVarInt(As, Endian.big, 8);
-                } else DeserializeError.TypeTooSmall,
-                .Uint_32, .Int_32 => if (int.bits >= 32) {
-                    return try self.reader.takeVarInt(As, Endian.big, 4);
-                } else DeserializeError.TypeTooSmall,
-                .Uint_16, .Int_16 => if (int.bits >= 16) {
-                    return try self.reader.takeVarInt(As, Endian.big, 2);
-                } else DeserializeError.TypeTooSmall,
-                .Uint_8, .Int_8 => if (int.bits >= 8) {
-                    return try self.reader.takeVarInt(As, Endian.big, 1);
-                } else DeserializeError.TypeTooSmall,
-                .FixPositive => |number| {
-                    const value: As = @intCast(number);
-                    return value;
-                },
-                .FixNegative => |number| {
-                    const value: As = @intCast(@as(i6, @bitCast(0b10_0000 | @as(u6, number))));
-                    return value;
-                },
-                else => return DeserializeError.WrongType,
+                .Uint_64 => self.take_int(As, u64),
+                .Int_64 => self.take_int(As, i64),
+                .Uint_32 => self.take_int(As, u32),
+                .Int_32 => self.take_int(As, i32),
+                .Uint_16 => self.take_int(As, u16),
+                .Int_16 => self.take_int(As, i16),
+                .Uint_8 => self.take_int(As, u8),
+                .Int_8 => self.take_int(As, i8),
+                .FixPositive => |number| std.math.cast(As, number) orelse
+                    DeserializeError.TypeTooSmall,
+                .FixNegative => |number| std.math.cast(
+                    As,
+                    @as(i6, @bitCast(0b10_0000 | @as(u6, number))),
+                ) orelse DeserializeError.TypeTooSmall,
+                else => DeserializeError.WrongType,
             },
         };
     }
