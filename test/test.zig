@@ -243,6 +243,29 @@ test "32-bit length ext round-trip" {
     );
 }
 
+// Found by fuzzing: an ext payload of length 0 fell through every arm of the
+// marker switch in `write_ext` and hit `unreachable`. The spec gives ext 8 only
+// an upper bound on its length, and there is no fixext 0, so ext 8 with a
+// length of 0 is the only way to encode an empty payload.
+test "empty ext round-trip" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    const val = MyType{ .buf = "" };
+    try packer.pack(val);
+    packer.finish();
+    // 0xc7 = ext 8, then the length (0), then the ext type id.
+    try testing.expectEqualSlices(u8, &.{ 0xc7, 0x00, 0x71 }, aw.written());
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(MyType);
+    defer testing.allocator.free(unpacked.buf);
+    try testing.expectEqualDeep(
+        val,
+        unpacked,
+    );
+}
+
 test "timestamp 32 round-trip" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
