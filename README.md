@@ -26,18 +26,26 @@ zig build docs
 
 Fuzz tests live in `fuzz/fuzz.zig` and use Zig's built-in `std.testing.fuzz` API.
 
-Two strategies are employed:
+Three strategies are employed:
 
-- **Unpacker fuzzing** (`fuzz unpack raw bytes`) — Feeds arbitrary byte sequences
-  to the `Unpacker` and attempts to deserialize every primitive type (bool, ints,
-  floats, strings, timestamps). Expected `DeserializeError` returns are ignored;
-  only panics and crashes are caught. This is the most critical target since
-  msgpack is a binary format commonly parsed from untrusted input.
+- **Unpacker fuzzing** (`fuzz unpack scalars`, `arrays`, `maps`, `structs`) —
+  Feeds arbitrary byte sequences to the `Unpacker` and attempts to deserialize
+  each family of types. Expected `DeserializeError` returns are ignored; only
+  panics, crashes and leaks are caught. This is the most critical target since
+  msgpack is a binary format commonly parsed from untrusted input. The container
+  targets matter especially because they size an allocation from a length field
+  taken straight from the input, then fill it with fallible reads.
 
-- **Structured round-trip fuzzing** (5 tests) — Uses `Smith` to generate random
-  values (`u64`, `i64`, `?u32`, `bool`, `f64`), packs them with `Packer`, then
-  unpacks with `Unpacker` and asserts the result matches the original. Catches
-  logic errors in both serialization and deserialization paths.
+- **Structured round-trip fuzzing** — Uses `Smith` to generate random values,
+  packs them with `Packer`, then unpacks with `Unpacker` and asserts the result
+  matches the original. Covers scalars (`u64`, `i64`, `?u32`, `bool`, `f32`,
+  `f64`), non-power-of-two and oversized int widths, strings, binary blobs,
+  slices, maps, structs serialized as maps, extension types, and timestamps.
+  Catches logic errors in both serialization and deserialization paths.
+
+- **Mutation fuzzing** (`fuzz mutated valid message`) — Packs a valid message,
+  then lets the fuzzer corrupt a single byte. Keeping the prefix structurally
+  valid reaches parser states that uniformly random bytes almost never hit.
 
 When run without `--fuzz`, each fuzz test executes as a quick smoke test against
 an empty input. With `--fuzz`, the build system rebuilds the test binary with
