@@ -13,6 +13,8 @@ pub const DeserializeError = error{
     WrongArrayLength,
     WrongExtType,
     WrongFields,
+    /// A message asked for more memory than `Unpacker.Options.max_message_bytes`.
+    MessageTooLong,
 };
 
 pub const Unpacker = struct {
