@@ -20,13 +20,69 @@ pub const DeserializeError = error{
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
     reader: *std.Io.Reader,
+    options: Options,
+    /// Bytes charged against `options.max_message_bytes` so far, reset by each
+    /// top-level `unpack_as`.
+    budget_used: usize = 0,
 
-    /// Initialize from a Reader (e.g. file, network, fixed buffer).
+    /// Limits on what a single message is allowed to cost.
+    pub const Options = struct {
+        /// Total bytes one message may demand while being decoded; exceeding it
+        /// is `DeserializeError.MessageTooLong`.
+        ///
+        /// This is charged against the *declared* size of each container, and is
+        /// never given back within a message — it is a ceiling on what a message
+        /// may ask for, not a measurement of live heap. Decoding a struct
+        /// over-charges slightly, since each field's key string is charged and
+        /// then freed once matched; that is bounded by the field count.
+        max_message_bytes: usize = 64 * 1024 * 1024,
+        /// How much may be reserved up front from a declared length, before any
+        /// of that data has actually been seen. At or below this, a value costs
+        /// one exact allocation; above it, capacity follows the data as it
+        /// arrives. Purely a performance dial — `max_message_bytes` is what
+        /// bounds the damage.
+        max_prealloc_bytes: usize = 1024 * 1024,
+    };
+
+    /// Initialize from a Reader (e.g. file, network, fixed buffer) with the
+    /// default limits.
     pub fn init(allocator: std.mem.Allocator, reader: *std.Io.Reader) Unpacker {
+        return initWithOptions(allocator, reader, .{});
+    }
+
+    /// Initialize with explicit limits. See `Options`.
+    pub fn initWithOptions(
+        allocator: std.mem.Allocator,
+        reader: *std.Io.Reader,
+        options: Options,
+    ) Unpacker {
         return Unpacker{
             .allocator = allocator,
             .reader = reader,
+            .options = options,
         };
+    }
+
+    /// Charge one container's declared size against the message budget, before
+    /// any of it is allocated. `count` and `elem_size` are `u64` so that the
+    /// multiply cannot wrap a 32-bit `usize`, and it saturates rather than
+    /// overflowing so an absurd declared length fails the comparison instead of
+    /// wrapping into a small one.
+    fn charge(self: *Unpacker, count: u64, elem_size: u64) DeserializeError!void {
+        const bytes = count *| elem_size;
+        if (bytes > self.options.max_message_bytes - self.budget_used) {
+            return DeserializeError.MessageTooLong;
+        }
+        self.budget_used += @intCast(bytes);
+    }
+
+    /// Number of elements worth reserving up front for `Elem`, given the
+    /// declared `count`. Never speculates past `max_prealloc_bytes`, but always
+    /// allows at least one element so an oversized single element still decodes.
+    fn prealloc_count(self: *Unpacker, comptime Elem: type, count: usize) usize {
+        if (@sizeOf(Elem) == 0) return count;
+        const cap = @max(1, self.options.max_prealloc_bytes / @sizeOf(Elem));
+        return @min(count, cap);
     }
 
     fn take_marker(self: *Unpacker) !Marker {
@@ -41,7 +97,17 @@ pub const Unpacker = struct {
         return marker.decode(byte);
     }
 
+    /// Decode one message as `As`.
+    ///
+    /// Each call starts a fresh `options.max_message_bytes` budget, so this is
+    /// the message boundary: nested values recurse through `unpack_value` and
+    /// share the budget of the message they belong to.
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
+        self.budget_used = 0;
+        return self.unpack_value(As);
+    }
+
+    fn unpack_value(self: *Unpacker, comptime As: type) !As {
         return switch (@typeInfo(As)) {
             .int => |int| self.unpack_int(int, As),
             .bool => switch (try self.take_marker()) {
@@ -58,7 +124,7 @@ pub const Unpacker = struct {
                     _ = try self.reader.takeByte();
                     return null;
                 },
-                else => try self.unpack_as(optional.child),
+                else => try self.unpack_value(optional.child),
             },
             .float => |float| self.unpack_float(float, As),
             .pointer => |pointer| switch (pointer.size) {
@@ -165,13 +231,18 @@ pub const Unpacker = struct {
     }
 
     fn unpack_string(self: *Unpacker, comptime As: type) !As {
-        const len: usize = switch (try self.take_marker()) {
-            .Bin_32, .Str_32 => @intCast(self.reader.takeInt(u32, Endian.big) catch return DeserializeError.Finished),
-            .Bin_16, .Str_16 => @intCast(self.reader.takeInt(u16, Endian.big) catch return DeserializeError.Finished),
+        // Read the declared length as a u64 and charge it before narrowing to
+        // usize, so an oversized header is rejected without the allocator ever
+        // seeing the number.
+        const declared: u64 = switch (try self.take_marker()) {
+            .Bin_32, .Str_32 => self.reader.takeInt(u32, Endian.big) catch return DeserializeError.Finished,
+            .Bin_16, .Str_16 => self.reader.takeInt(u16, Endian.big) catch return DeserializeError.Finished,
             .Bin_8, .Str_8 => self.reader.takeByte() catch return DeserializeError.Finished,
             .FixStr => |fix_len| fix_len,
             else => return DeserializeError.WrongType,
         };
+        try self.charge(declared, 1);
+        const len: usize = @intCast(declared);
         const str = try self.allocator.alloc(u8, len);
         errdefer self.allocator.free(str);
         self.reader.readSliceAll(str) catch return DeserializeError.Finished;
@@ -180,32 +251,22 @@ pub const Unpacker = struct {
 
     fn unpack_array(self: *Unpacker, comptime target_len: ?usize, comptime As: type) !As {
         const info = @typeInfo(As);
-        var array: As = undefined;
-        switch (try self.take_marker()) {
-            .FixArray => |len| {
-                if (target_len != null) {
-                    if (target_len.? != len) return DeserializeError.WrongArrayLength;
-                } else {
-                    array = try self.allocator.alloc(info.pointer.child, len);
-                }
-            },
-            .Array_16 => {
-                const len = try self.reader.takeInt(u16, Endian.big);
-                if (target_len != null) {
-                    if (target_len.? != len) return DeserializeError.WrongArrayLength;
-                } else {
-                    array = try self.allocator.alloc(info.pointer.child, len);
-                }
-            },
-            .Array_32 => {
-                const len = try self.reader.takeInt(u32, Endian.big);
-                if (target_len != null) {
-                    if (target_len.? != len) return DeserializeError.WrongArrayLength;
-                } else {
-                    array = try self.allocator.alloc(info.pointer.child, len);
-                }
-            },
+        // Read the length once, then decide what to do with it: a fixed-size
+        // target only validates it, while a slice has to be sized from it and so
+        // must charge for it first.
+        const declared: u64 = switch (try self.take_marker()) {
+            .FixArray => |fix_len| fix_len,
+            .Array_16 => try self.reader.takeInt(u16, Endian.big),
+            .Array_32 => try self.reader.takeInt(u32, Endian.big),
             else => return DeserializeError.WrongType,
+        };
+        var array: As = undefined;
+        if (target_len) |want| {
+            // The caller owns the buffer, so there is nothing to charge.
+            if (want != declared) return DeserializeError.WrongArrayLength;
+        } else {
+            try self.charge(declared, @sizeOf(info.pointer.child));
+            array = try self.allocator.alloc(info.pointer.child, @intCast(declared));
         }
         // A failing element read must not strand the buffer, nor the elements
         // unpacked into it so far.
@@ -215,7 +276,7 @@ pub const Unpacker = struct {
             if (info != .array) self.allocator.free(array);
         }
         for (if (info == .array) &array else array) |*element| {
-            element.* = try self.unpack_as(@TypeOf(element.*));
+            element.* = try self.unpack_value(@TypeOf(element.*));
             unpacked += 1;
         }
         return array;
@@ -253,11 +314,19 @@ pub const Unpacker = struct {
             for (map.values()) |value| self.free_unpacked(value);
             map.deinit(self.allocator);
         }
+        // Charge the declared entry count before reserving anything for it. The
+        // per-entry figure is an approximation, not the map's exact footprint:
+        // an ArrayHashMap keeps an index table alongside the entry array, so the
+        // extra u32 stands in for the index slot. Better to over-charge than to
+        // under-charge something whose job is to bound memory.
+        const Key = @TypeOf(@as(As.KV, undefined).key);
+        const Value = @TypeOf(@as(As.KV, undefined).value);
+        try self.charge(len, @sizeOf(Key) + @sizeOf(Value) + @sizeOf(u32));
         try map.ensureTotalCapacity(self.allocator, len);
         for (0..len) |_| {
-            const key = try self.unpack_as(@TypeOf(@as(As.KV, undefined).key));
+            const key = try self.unpack_value(@TypeOf(@as(As.KV, undefined).key));
             errdefer self.free_unpacked(key);
-            const value = try self.unpack_as(@TypeOf(@as(As.KV, undefined).value));
+            const value = try self.unpack_value(@TypeOf(@as(As.KV, undefined).value));
             errdefer self.free_unpacked(value);
             try map.put(self.allocator, key, value);
         }
@@ -305,12 +374,12 @@ pub const Unpacker = struct {
             }
         };
         for (0..len) |_| {
-            const key = try self.unpack_as([]const u8);
+            const key = try self.unpack_value([]const u8);
             defer self.allocator.free(key);
             if (!fields_to_fill.contains(key)) return DeserializeError.WrongFields;
             inline for (fields) |field| {
                 if (std.mem.eql(u8, key, field.name)) {
-                    @field(out, field.name) = try self.unpack_as(field.type);
+                    @field(out, field.name) = try self.unpack_value(field.type);
                     fields_to_fill.remove(field.name);
                     break;
                 }
@@ -322,6 +391,7 @@ pub const Unpacker = struct {
     fn unpack_ext(self: *Unpacker, comptime As: type, comptime type_id: i8, comptime callback: anytype) !As {
         const metadata = try self.ext_decode();
         if (metadata.type_id != type_id) return DeserializeError.WrongExtType;
+        try self.charge(metadata.len, 1);
         const slice = try self.allocator.alloc(u8, metadata.len);
         // Ownership of `slice` transfers to `callback`, which frees it on its
         // own error path — so only free here if the read itself fails.
