@@ -945,3 +945,47 @@ test "Bounded: ext header declaring more bytes than the budget allows" {
         message.unpack_as(MyType),
     );
 }
+
+// The point of growing from delivered bytes rather than the declared length: a
+// header can claim a size that is under the budget and still unbacked, and that
+// must cost only what the stream actually holds. Str_32 declaring 60 MiB with a
+// handful of bytes behind it used to mean a 60 MiB allocation; now it is a small
+// allocation, a short read and `Finished`. `testing.allocator` failing the run on
+// a leak is what pins the cleanup.
+test "Bounded: string declaring far more than it delivers costs only what arrives" {
+    // 0xdb = Str_32, 0x03C00000 = 62_914_560 bytes declared, 8 bytes present.
+    var r = std.Io.Reader.fixed("\xdb\x03\xC0\x00\x00" ++ "abcdefgh");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        DeserializeError.Finished,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "Bounded: array declaring far more elements than it delivers" {
+    // Array_32 of 1_000_000 u32s, with two elements actually present.
+    var r = std.Io.Reader.fixed("\xdd\x00\x0F\x42\x40" ++ "\x01\x02");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        error.EndOfStream,
+        message.unpack_as([]u32),
+    );
+}
+
+// The exact-size reserve below `max_prealloc_bytes` is load-bearing, not a
+// nicety: without it the decode would allocate the payload, then grow capacity
+// past it and memcpy, on every string. Pinning that is what this test is for —
+// the arena holds the payload and little else, so a decode that grew beyond the
+// declared length would run out of memory instead of passing.
+test "Bounded: a value under the reserve cap decodes in one exact allocation" {
+    const len = 4096;
+    const payload = "z" ** len;
+    // 0xdb = Str_32, then the length, then exactly that many bytes.
+    var r = std.Io.Reader.fixed("\xdb\x00\x00\x10\x00" ++ payload);
+
+    var scratch: [len + 64]u8 = undefined;
+    var fba = std.heap.FixedBufferAllocator.init(&scratch);
+    var message = Unpacker.init(fba.allocator(), &r);
+    const unpacked = try message.unpack_as([]const u8);
+    try testing.expectEqualStrings(payload, unpacked);
+}

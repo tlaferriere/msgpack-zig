@@ -387,3 +387,181 @@ test "truncated object as map does not leak" {
     var message = msgpack.Unpacker.init(testing.allocator, &r);
     _ = message.unpack_as(MyStruct) catch {};
 }
+
+// The default reserve cap is 1 MiB, and every other test in this file tops out
+// well under it, so these exist to exercise the other side of that branch: values
+// whose capacity has to grow from the data as it arrives rather than being
+// allocated from the declared length in one go. Each asserts the exact input
+// comes back, since a growth bug shows up as truncation or reordering.
+
+test "string past the prealloc reserve round-trips" {
+    const len = 1536 * 1024; // 1.5 MiB
+    const val = try testing.allocator.alloc(u8, len);
+    defer testing.allocator.free(val);
+    for (val, 0..) |*b, i| b.* = @truncate(i);
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(val, unpacked);
+}
+
+test "slice past the prealloc reserve round-trips" {
+    const len = 400_000; // 1.6 MiB of u32
+    const val = try testing.allocator.alloc(u32, len);
+    defer testing.allocator.free(val);
+    for (val, 0..) |*e, i| e.* = @intCast(i);
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as([]u32);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualSlices(u32, val, unpacked);
+}
+
+test "map past the prealloc reserve round-trips" {
+    // At 12 bytes charged per entry the 1 MiB reserve covers ~87k entries, so
+    // this crosses it and `put` has to grow the map the rest of the way.
+    const len = 120_000;
+    var val: std.array_hash_map.Auto(u32, u32) = .empty;
+    defer val.deinit(testing.allocator);
+    for (0..len) |i| {
+        try val.put(testing.allocator, @intCast(i), @intCast(i * 2));
+    }
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.init(testing.allocator, &r);
+    var unpacked = try message.unpack_as(std.array_hash_map.Auto(u32, u32));
+    defer unpacked.deinit(testing.allocator);
+    try testing.expectEqualSlices(u32, val.keys(), unpacked.keys());
+    try testing.expectEqualSlices(u32, val.values(), unpacked.values());
+}
+
+// Same three shapes with the reserve dialled down to 32 bytes, so the growth
+// loop runs dozens of times on modest inputs instead of once on a huge one. If
+// growth mishandles a boundary this is where it surfaces.
+const tiny_reserve: msgpack.Unpacker.Options = .{ .max_prealloc_bytes = 32 };
+
+test "string round-trips with a tiny prealloc reserve" {
+    const val = "the quick brown fox jumps over the lazy dog, repeatedly" ** 8;
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.initWithOptions(testing.allocator, &r, tiny_reserve);
+    const unpacked = try message.unpack_as([]const u8);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualStrings(val, unpacked);
+}
+
+test "slice round-trips with a tiny prealloc reserve" {
+    const len = 500;
+    const val = try testing.allocator.alloc(u32, len);
+    defer testing.allocator.free(val);
+    for (val, 0..) |*e, i| e.* = @intCast(i * 7);
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.initWithOptions(testing.allocator, &r, tiny_reserve);
+    const unpacked = try message.unpack_as([]u32);
+    defer testing.allocator.free(unpacked);
+    try testing.expectEqualSlices(u32, val, unpacked);
+}
+
+test "map round-trips with a tiny prealloc reserve" {
+    const len = 300;
+    var val: std.array_hash_map.Auto(u32, u32) = .empty;
+    defer val.deinit(testing.allocator);
+    for (0..len) |i| {
+        try val.put(testing.allocator, @intCast(i), @intCast(i * 3));
+    }
+
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = msgpack.Unpacker.initWithOptions(testing.allocator, &r, tiny_reserve);
+    var unpacked = try message.unpack_as(std.array_hash_map.Auto(u32, u32));
+    defer unpacked.deinit(testing.allocator);
+    try testing.expectEqualSlices(u32, val.keys(), unpacked.keys());
+    try testing.expectEqualSlices(u32, val.values(), unpacked.values());
+}
+
+// A nested value charges against the same budget as the message containing it,
+// so many individually-modest containers cannot add up past the limit. Uses a
+// deliberately tiny budget with real payloads, so what fails is the accumulation
+// and not a truncated read.
+test "nested containers share one message budget" {
+    // FixArray of 4 slices charges 4 * 16 = 64 of the 100-byte budget. The first
+    // FixStr of 20 brings it to 84 and succeeds; the second would reach 104, and
+    // is rejected before its payload is even looked at.
+    const message_bytes = "\x94" ++ "\xb4" ++ ("a" ** 20) ++ "\xb4";
+    var r = std.Io.Reader.fixed(message_bytes);
+    var message = msgpack.Unpacker.initWithOptions(
+        testing.allocator,
+        &r,
+        .{ .max_message_bytes = 100 },
+    );
+    try testing.expectError(
+        error.MessageTooLong,
+        message.unpack_as([][]const u8),
+    );
+}
+
+// The budget is per message, not per Unpacker: decoding one message must not
+// leave a smaller allowance for the next one off the same reader.
+test "budget resets between messages on one reader" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = msgpack.Packer.init(&aw.writer, testing.allocator);
+    const val = "0123456789" ** 4;
+    // Three messages back to back, each costing the same.
+    try packer.pack(val);
+    try packer.pack(val);
+    try packer.pack(val);
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    // A budget that comfortably fits one message but not three.
+    var message = msgpack.Unpacker.initWithOptions(
+        testing.allocator,
+        &r,
+        .{ .max_message_bytes = val.len + 8 },
+    );
+    for (0..3) |_| {
+        const unpacked = try message.unpack_as([]const u8);
+        defer testing.allocator.free(unpacked);
+        try testing.expectEqualStrings(val, unpacked);
+    }
+}
