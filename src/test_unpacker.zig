@@ -893,3 +893,55 @@ test "Leak: fixed-size array truncated before its last element" {
     var message = Unpacker.init(testing.allocator, &r);
     _ = message.unpack_as([2][]const u8) catch {};
 }
+
+// Found by fuzzing: a declared length was used as an allocation size before any
+// of the payload had been seen, so a 5-byte header could demand tens of
+// gigabytes and get the process OOM-killed.
+//
+// These run against `testing.failing_allocator` rather than `testing.allocator`
+// on purpose. None of these messages contains anything legitimate to allocate,
+// so before the fix the oversized request is the very first allocation and comes
+// back as `error.OutOfMemory` instead of taking the test runner down with it.
+// After the fix the budget rejects the header before any allocator is touched,
+// which is exactly what `expectError(MessageTooLong, ...)` pins down.
+
+test "Bounded: map header declaring more entries than the budget allows" {
+    // The exact input the fuzzer found: Map_32 (0xdf) declaring 2_790_458_596
+    // entries, which at 8 bytes per u32/u32 pair is over 20 GiB.
+    var r = std.Io.Reader.fixed("\xdf\xa6\x54\xf8\xe4");
+    var message = Unpacker.init(testing.failing_allocator, &r);
+    try testing.expectError(
+        DeserializeError.MessageTooLong,
+        message.unpack_as(std.array_hash_map.Auto(u32, u32)),
+    );
+}
+
+test "Bounded: array header declaring more elements than the budget allows" {
+    // Array_32 (0xdd) of 0xFFFFFFFF u64s — 32 GiB.
+    var r = std.Io.Reader.fixed("\xdd\xff\xff\xff\xff");
+    var message = Unpacker.init(testing.failing_allocator, &r);
+    try testing.expectError(
+        DeserializeError.MessageTooLong,
+        message.unpack_as([]u64),
+    );
+}
+
+test "Bounded: string header declaring more bytes than the budget allows" {
+    // Str_32 (0xdb) declaring 4 GiB of payload, with none of it present.
+    var r = std.Io.Reader.fixed("\xdb\xff\xff\xff\xff");
+    var message = Unpacker.init(testing.failing_allocator, &r);
+    try testing.expectError(
+        DeserializeError.MessageTooLong,
+        message.unpack_as([]const u8),
+    );
+}
+
+test "Bounded: ext header declaring more bytes than the budget allows" {
+    // Ext_32 (0xc9) declaring 4 GiB, type id 0x71, no payload.
+    var r = std.Io.Reader.fixed("\xc9\xff\xff\xff\xff\x71");
+    var message = Unpacker.init(testing.failing_allocator, &r);
+    try testing.expectError(
+        DeserializeError.MessageTooLong,
+        message.unpack_as(MyType),
+    );
+}
