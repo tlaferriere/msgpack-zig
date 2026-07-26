@@ -242,11 +242,35 @@ pub const Unpacker = struct {
             else => return DeserializeError.WrongType,
         };
         try self.charge(declared, 1);
-        const len: usize = @intCast(declared);
-        const str = try self.allocator.alloc(u8, len);
-        errdefer self.allocator.free(str);
-        self.reader.readSliceAll(str) catch return DeserializeError.Finished;
-        return @as(As, str);
+        return @as(As, try self.read_bytes(declared));
+    }
+
+    /// Read exactly `len` bytes into a caller-owned slice, freeing them again if
+    /// the stream turns out not to have that many.
+    ///
+    /// The declared length is passed to the Reader as a *limit* rather than used
+    /// as an allocation size, so capacity follows the bytes that actually arrive
+    /// and a length the stream cannot back costs only what it delivers.
+    fn read_bytes(self: *Unpacker, len: u64) ![]u8 {
+        var list: std.ArrayList(u8) = .empty;
+        errdefer list.deinit(self.allocator);
+        // Speculate only up to the reserve cap. Below it this is the exact size,
+        // which keeps an honest value at one allocation: `Writer.write` copies
+        // straight into this capacity without reaching `Allocating.drain`, and
+        // `toOwnedSlice` then remaps in place. Removing this reserve would add a
+        // realloc and a full-payload memcpy to every string, bin and ext.
+        const reserve: usize = @intCast(@min(len, self.options.max_prealloc_bytes));
+        try list.ensureTotalCapacityPrecise(self.allocator, reserve);
+        self.reader.appendRemaining(self.allocator, &list, .limited64(len)) catch |e| switch (e) {
+            // Inverted on purpose: hitting the limit means every requested byte
+            // arrived, which is the success case. A short stream returns
+            // normally instead, with fewer bytes than asked for.
+            error.StreamTooLong => {},
+            error.ReadFailed => return DeserializeError.Finished,
+            error.OutOfMemory => return e,
+        };
+        if (list.items.len != len) return DeserializeError.Finished;
+        return list.toOwnedSlice(self.allocator);
     }
 
     fn unpack_array(self: *Unpacker, comptime target_len: ?usize, comptime As: type) !As {
@@ -260,26 +284,52 @@ pub const Unpacker = struct {
             .Array_32 => try self.reader.takeInt(u32, Endian.big),
             else => return DeserializeError.WrongType,
         };
+        if (target_len == null) return self.unpack_slice(info.pointer.child, As, declared);
+
+        // Fixed-size target: the buffer is the caller's, so there is nothing to
+        // allocate and nothing to charge — only the length to validate.
+        if (target_len.? != declared) return DeserializeError.WrongArrayLength;
         var array: As = undefined;
-        if (target_len) |want| {
-            // The caller owns the buffer, so there is nothing to charge.
-            if (want != declared) return DeserializeError.WrongArrayLength;
-        } else {
-            try self.charge(declared, @sizeOf(info.pointer.child));
-            array = try self.allocator.alloc(info.pointer.child, @intCast(declared));
-        }
-        // A failing element read must not strand the buffer, nor the elements
-        // unpacked into it so far.
+        // A failing element read must not strand the elements unpacked so far.
         var unpacked: usize = 0;
-        errdefer {
-            for (array[0..unpacked]) |element| self.free_unpacked(element);
-            if (info != .array) self.allocator.free(array);
-        }
-        for (if (info == .array) &array else array) |*element| {
+        errdefer for (array[0..unpacked]) |element| self.free_unpacked(element);
+        for (&array) |*element| {
             element.* = try self.unpack_value(@TypeOf(element.*));
             unpacked += 1;
         }
         return array;
+    }
+
+    /// Decode `count` elements into a caller-owned slice.
+    ///
+    /// Capacity grows from the elements actually decoded rather than from
+    /// `count`, so a header promising four billion elements only ever costs what
+    /// the stream can deliver. `ArrayList` supplies the geometric growth, so this
+    /// stays amortized O(1) per element.
+    fn unpack_slice(
+        self: *Unpacker,
+        comptime Child: type,
+        comptime As: type,
+        count: u64,
+    ) !As {
+        try self.charge(count, @sizeOf(Child));
+        var list: std.ArrayList(Child) = .empty;
+        // Everything already in the list still owns its own allocations.
+        errdefer {
+            for (list.items) |element| self.free_unpacked(element);
+            list.deinit(self.allocator);
+        }
+        try list.ensureTotalCapacityPrecise(
+            self.allocator,
+            self.prealloc_count(Child, @intCast(count)),
+        );
+        for (0..@as(usize, @intCast(count))) |_| {
+            // Reserve before decoding, not after: an element that has been
+            // unpacked needs somewhere to go, or a failing append drops it.
+            try list.ensureUnusedCapacity(self.allocator, 1);
+            list.appendAssumeCapacity(try self.unpack_value(Child));
+        }
+        return list.toOwnedSlice(self.allocator);
     }
 
     /// Release whatever `unpack_as` allocated for a value it returned.
@@ -321,8 +371,13 @@ pub const Unpacker = struct {
         // under-charge something whose job is to bound memory.
         const Key = @TypeOf(@as(As.KV, undefined).key);
         const Value = @TypeOf(@as(As.KV, undefined).value);
-        try self.charge(len, @sizeOf(Key) + @sizeOf(Value) + @sizeOf(u32));
-        try map.ensureTotalCapacity(self.allocator, len);
+        const entry_bytes = @sizeOf(Key) + @sizeOf(Value) + @sizeOf(u32);
+        try self.charge(len, entry_bytes);
+        // Reserve only up to the cap and let `put` grow the rest geometrically,
+        // so a declared entry count the stream cannot back costs nothing up
+        // front.
+        const cap_entries = @max(1, self.options.max_prealloc_bytes / entry_bytes);
+        try map.ensureTotalCapacity(self.allocator, @min(len, cap_entries));
         for (0..len) |_| {
             const key = try self.unpack_value(@TypeOf(@as(As.KV, undefined).key));
             errdefer self.free_unpacked(key);
@@ -392,16 +447,10 @@ pub const Unpacker = struct {
         const metadata = try self.ext_decode();
         if (metadata.type_id != type_id) return DeserializeError.WrongExtType;
         try self.charge(metadata.len, 1);
-        const slice = try self.allocator.alloc(u8, metadata.len);
-        // Ownership of `slice` transfers to `callback`, which frees it on its
-        // own error path — so only free here if the read itself fails.
-        self.reader.readSliceAll(slice) catch |e| {
-            self.allocator.free(slice);
-            return switch (e) {
-                error.EndOfStream => DeserializeError.Finished,
-                else => e,
-            };
-        };
+        // `read_bytes` frees on its own error path, so `slice` only reaches
+        // `callback` complete — and from there ownership is the callback's, which
+        // frees it if it fails.
+        const slice = try self.read_bytes(metadata.len);
         return callback(self.allocator, slice);
     }
 
