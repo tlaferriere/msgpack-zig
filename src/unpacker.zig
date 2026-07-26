@@ -85,6 +85,12 @@ pub const Unpacker = struct {
         return @min(count, cap);
     }
 
+    // TODO(#10): every container path reaches the reader through here and
+    // through a bare `try self.reader.takeInt(...)` for its length —
+    // `unpack_array`, `unpack_map`, `unpack_map_as_struct` and `ext_decode` all
+    // propagate `EndOfStream`/`ReadFailed` raw, while `unpack_string` maps them
+    // to `Finished`. Streaming needs one consistent answer for "ended early",
+    // distinct from "the transport broke".
     fn take_marker(self: *Unpacker) !Marker {
         const byte = try self.reader.takeByte();
         return marker.decode(byte);
@@ -102,7 +108,15 @@ pub const Unpacker = struct {
     /// Each call starts a fresh `options.max_message_bytes` budget, so this is
     /// the message boundary: nested values recurse through `unpack_value` and
     /// share the budget of the message they belong to.
+    ///
+    /// The reader must have been constructed with a buffer of at least 8 bytes:
+    /// `takeInt` asserts a capacity of `@bitSizeOf(T) / 8` and the widest read
+    /// here is a `u64`, while `peek_marker` needs one byte to peek.
     pub fn unpack_as(self: *Unpacker, comptime As: type) !As {
+        // TODO(#10): this is where resumable decoding would begin and end. A
+        // message arriving in pieces needs the recursion below to suspend and be
+        // resumed with more data, which means the budget must persist across
+        // resumptions instead of resetting on entry.
         self.budget_used = 0;
         return self.unpack_value(As);
     }
@@ -234,6 +248,11 @@ pub const Unpacker = struct {
         // Read the declared length as a u64 and charge it before narrowing to
         // usize, so an oversized header is rejected without the allocator ever
         // seeing the number.
+        // TODO(#10): these `catch`es flatten `ReadFailed` and `EndOfStream` into
+        // one error, and the other containers propagate the reader's error raw
+        // instead — so "the message ended early" surfaces differently depending
+        // on which container you were decoding. Streaming needs both unified and
+        // transport failure kept distinct from truncation.
         const declared: u64 = switch (try self.take_marker()) {
             .Bin_32, .Str_32 => self.reader.takeInt(u32, Endian.big) catch return DeserializeError.Finished,
             .Bin_16, .Str_16 => self.reader.takeInt(u16, Endian.big) catch return DeserializeError.Finished,
@@ -266,9 +285,17 @@ pub const Unpacker = struct {
             // arrived, which is the success case. A short stream returns
             // normally instead, with fewer bytes than asked for.
             error.StreamTooLong => {},
+            // TODO(#10): streaming readers need these kept apart. `ReadFailed`
+            // is the transport breaking, not the message ending, and a caller on
+            // a socket has to be able to tell those apart.
             error.ReadFailed => return DeserializeError.Finished,
             error.OutOfMemory => return e,
         };
+        // TODO(#10): for a reader that has not been handed the whole message
+        // yet, this is where decoding would have to suspend and resume rather
+        // than give up. Looping here would not be enough: `appendRemaining` only
+        // returns short on a true `EndOfStream`, so the loop has to live where
+        // more data can actually be supplied.
         if (list.items.len != len) return DeserializeError.Finished;
         return list.toOwnedSlice(self.allocator);
     }
@@ -314,6 +341,10 @@ pub const Unpacker = struct {
     ) !As {
         try self.charge(count, @sizeOf(Child));
         var list: std.ArrayList(Child) = .empty;
+        // TODO(#10): resumable decoding would have to hand this partially filled
+        // list back to the next call rather than unwind it. Same for the map in
+        // `unpack_map` and `fields_to_fill` in `unpack_map_as_struct` — the
+        // `errdefer` below is what makes a short read final.
         // Everything already in the list still owns its own allocations.
         errdefer {
             for (list.items) |element| self.free_unpacked(element);
@@ -359,6 +390,8 @@ pub const Unpacker = struct {
         };
         // A truncated map must not strand the map itself, the entries read so
         // far, or a key whose value never arrived.
+        // TODO(#10): and for streaming it would have to be kept instead of
+        // unwound, so decoding can resume into the same partially built map.
         errdefer {
             for (map.keys()) |key| self.free_unpacked(key);
             for (map.values()) |value| self.free_unpacked(value);
@@ -423,6 +456,8 @@ pub const Unpacker = struct {
         var out = std.mem.zeroes(As);
         // A field is filled once it leaves `fields_to_fill`; on failure every
         // filled field has to give back whatever it allocated.
+        // TODO(#10): resuming a partially decoded struct would mean carrying
+        // `fields_to_fill` and `out` across calls rather than unwinding them.
         errdefer inline for (fields) |field| {
             if (!fields_to_fill.contains(field.name)) {
                 self.free_unpacked(@field(out, field.name));
