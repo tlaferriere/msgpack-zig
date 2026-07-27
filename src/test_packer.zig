@@ -674,3 +674,31 @@ test "Serialize Ext_8 timestamp" {
     const actual = aw.written();
     try testing.expectEqualStrings("\xc7\x0C\xFF\x00\x00\x00\x01\x0E\xAD\xBE\xEF\xDE\xAD\xBE\xEF", actual);
 }
+
+// The pack side of the boundary the unpacker tests cover. Neither of these
+// could be written before the field was widened: `u29` cannot hold either
+// value, so the `TooManyNanoseconds` guard in `packed_size` was unreachable.
+test "Serialize FixExt_8 timestamp at the maximum legal nanoseconds" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    const val = Timestamp{ .nanoseconds = 999_999_999, .seconds = 0 };
+    try packer.pack(val);
+    const actual = aw.written();
+    try testing.expectEqualStrings("\xd7\xFF\xEE\x6B\x27\xFC\x00\x00\x00\x00", actual);
+}
+
+// Above the limit there is no encoding to reach for, so packing has to refuse.
+// `write_ext` asks for `packed_size` before writing anything, so nothing has
+// reached the writer by the time the error surfaces.
+test "Serialize timestamp over the nanosecond limit" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    const val = Timestamp{ .nanoseconds = 1_000_000_000, .seconds = 0 };
+    try testing.expectError(
+        Timestamp.Error.TooManyNanoseconds,
+        packer.pack(val),
+    );
+    try testing.expectEqualStrings("", aw.written());
+}
