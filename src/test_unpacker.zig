@@ -702,6 +702,28 @@ test "Deserialize Timestamp 96 at the maximum legal nanoseconds" {
     try testing.expectEqual(@as(i64, 0), unpacked.seconds);
 }
 
+// The other side of the boundary. Both wire fields are wider than the spec's
+// limit, so a decoder has to reject the excess rather than truncate it — and
+// with the field widened, "reject" is now the only thing separating these from
+// the two tests above.
+test "Deserialize Timestamp 64 over the nanosecond limit" {
+    var r = std.Io.Reader.fixed("\xd7\xFF\xEE\x6B\x28\x00\x00\x00\x00\x00");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        Timestamp.Error.TooManyNanoseconds,
+        message.unpack_as(Timestamp),
+    );
+}
+
+test "Deserialize Timestamp 96 over the nanosecond limit" {
+    var r = std.Io.Reader.fixed("\xc7\x0C\xFF\x3B\x9A\xCA\x00" ++ "\x00" ** 8);
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(
+        Timestamp.Error.TooManyNanoseconds,
+        message.unpack_as(Timestamp),
+    );
+}
+
 test "OOB: string with length exceeding buffer" {
     // A single byte 0xa1 = FixStr with declared length 1.
     // The unpacker advances offset to 1, then tries to @memcpy

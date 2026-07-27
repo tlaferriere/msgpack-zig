@@ -613,7 +613,7 @@ test "fuzz round-trip timestamp" {
 
                 const val = msgpack.Timestamp{
                     .seconds = smith.value(i64),
-                    .nanoseconds = smith.value(u29),
+                    .nanoseconds = smith.value(u32),
                 };
 
                 const result = roundTrip(msgpack.Timestamp, val) catch |e| switch (e) {

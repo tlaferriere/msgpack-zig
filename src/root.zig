@@ -13,7 +13,12 @@ pub const Timestamp = struct {
     seconds: i64,
     /// Nanoseconds since the last second. Must not be over 999_999_999 or
     /// serialization/deserialization will fail.
-    nanoseconds: u29,
+    ///
+    /// Sized to the widest field msgpack gives nanoseconds — the 32 bits of the
+    /// 96-bit encoding — so every value the wire can carry has somewhere to
+    /// land. The `<= 999_999_999` rule is narrower than any integer width, so
+    /// it stays a run-time check on both directions rather than this type's job.
+    nanoseconds: u32,
 
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = -1 };
@@ -138,7 +143,7 @@ pub const Timestamp = struct {
                             buffer[4..],
                             Endian.big,
                         ),
-                        .nanoseconds = @intCast(nanos),
+                        .nanoseconds = nanos,
                     };
                     break :blk timestamp;
                 },
