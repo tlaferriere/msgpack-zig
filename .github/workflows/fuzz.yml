@@ -41,7 +41,7 @@ jobs:
 
       - name: Run continuous fuzzing
         env:
-          ITERATIONS: ${{ github.event.inputs.iterations || '288000' }}
+          ITERATIONS: ${{ github.event.inputs.iterations || '5000000' }}
         # --fuzz=N runs N iterations per fuzz test then exits. A found crash is
         # reported and its input saved to .zig-cache/f/crash, but the build's
         # exit code stays 0 (zig 0.16 tallies step failures before the fuzz
