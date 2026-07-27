@@ -664,6 +664,44 @@ test "Deserialize Timestamp 96" {
     );
 }
 
+// Nightly fuzzing hit this in `fuzz unpack scalars`:
+//
+//     thread 2353 panic: integer does not fit in destination type
+//     src/root.zig:101:13: in unpack_ext
+//
+// Both decode paths check the spec's `nanoseconds <= 999_999_999` rule and then
+// cast the value into the struct's field, which is narrower than the rule: the
+// whole range 536_870_912 ..= 999_999_999 clears the check and dies on the cast.
+// These are timestamps msgpack considers well-formed.
+//
+// The expectations go through a `u32` local because the field cannot hold the
+// value being asserted — writing it as a struct literal would fail to compile
+// instead of reproducing the panic.
+
+// 64-bit encoding: payload is `(nanoseconds << 34) | seconds`, and
+// 999_999_999 << 34 is 0xEE6B27FC_00000000.
+test "Deserialize Timestamp 64 at the maximum legal nanoseconds" {
+    var r = std.Io.Reader.fixed("\xd7\xFF\xEE\x6B\x27\xFC\x00\x00\x00\x00");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    const expected_nanoseconds: u32 = 999_999_999;
+    const unpacked = try message.unpack_as(Timestamp);
+    try testing.expectEqual(expected_nanoseconds, unpacked.nanoseconds);
+    try testing.expectEqual(@as(i64, 0), unpacked.seconds);
+}
+
+// 96-bit encoding, where nanoseconds get a 32-bit field of their own ahead of
+// the 64-bit seconds.
+test "Deserialize Timestamp 96 at the maximum legal nanoseconds" {
+    var r = std.Io.Reader.fixed("\xc7\x0C\xFF\x3B\x9A\xC9\xFF" ++ "\x00" ** 8);
+    var message = Unpacker.init(testing.allocator, &r);
+
+    const expected_nanoseconds: u32 = 999_999_999;
+    const unpacked = try message.unpack_as(Timestamp);
+    try testing.expectEqual(expected_nanoseconds, unpacked.nanoseconds);
+    try testing.expectEqual(@as(i64, 0), unpacked.seconds);
+}
+
 test "OOB: string with length exceeding buffer" {
     // A single byte 0xa1 = FixStr with declared length 1.
     // The unpacker advances offset to 1, then tries to @memcpy
