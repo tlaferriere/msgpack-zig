@@ -19,7 +19,7 @@
     "zls": {
       "binary": {
         // omit the following line if `zls` is in your PATH
-        // "path": "zig/zls"
+        // "path": "/usr/local/bin/zls"
       },
       // There are two ways to set config options:
       //   - edit your `zls.json` that applies to any editor that uses ZLS

@@ -114,5 +114,39 @@ cache, which is what keeps rebuilds incremental between runs; the project's own
 `.zig-cache` (including the fuzz corpus) lives in the worktree as usual.
 
 Other Zig versions are one flag away, should you need to check behaviour against
-one: `--build-arg ZIG_VERSION=0.16.1 --build-arg ZLS_VERSION=0.16.1`. Zig
-tarballs are verified against the upstream minisign signature during the build.
+one: `--build-arg ZIG_VERSION=0.16.1 --build-arg ZLS_VERSION=0.16.1`. Left unset,
+`ZIG_VERSION` follows `.minimum_zig_version` in `build.zig.zon`, so the toolchain
+tracks the package rather than drifting from it. Zig tarballs are verified
+against the upstream minisign signature during the build.
+
+### Pulling the image instead of building it
+
+The `Dev Image` workflow publishes the same toolchain to GHCR on every push to
+`main`, so it can be pulled rather than rebuilt:
+
+```sh
+docker pull ghcr.io/tlaferriere/msgpack-zig-dev:latest
+docker run --rm -it -v "$PWD:/workspace" ghcr.io/tlaferriere/msgpack-zig-dev:latest
+```
+
+Images are tagged `latest` and `sha-<commit>`, and built for `linux/amd64` and
+`linux/arm64`. The published image is the `tools` stage: identical tools, but
+running as root with no baked-in uid, which is what suits a base image or a
+throwaway container. The `dev` stage above is the one to build locally, since
+only you know which uid should own your files.
+
+Note that GHCR packages start out private. To pull without authenticating, set
+the package to public once, under the repository's **Packages** settings.
+
+### Claude Code on the web
+
+Cloud sessions cannot use the image directly — [replacing the base image is not
+supported](https://code.claude.com/docs/en/claude-code-on-the-web). Zig is
+installed on top of the stock image instead, by a `SessionStart` hook in
+`.claude/settings.json` that runs `scripts/install-zig.sh` — the same installer
+the `Dockerfile` uses, so both paths land on the same compiler.
+
+That download needs `ziglang.org`, which is **not** on the default Trusted
+allowlist. Set the environment's network access to **Custom**, keep the default
+package-manager list, and add `ziglang.org`. Without it the hook reports the
+problem and the session still starts, but `zig build` will not work.
