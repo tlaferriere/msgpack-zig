@@ -85,4 +85,34 @@ continuously mutating inputs to maximize code coverage.
 
 ## Contributing
 
-To make it easy to have the right
+To make it easy to have the right toolchain on hand, the repo ships a
+`Dockerfile` that installs Zig 0.16 (the version `build.zig.zon` requires) and a
+matching ZLS. Build it once, passing your own uid/gid so files written into the
+mounted worktree stay yours:
+
+```sh
+docker build -t msgpack-zig-dev \
+    --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" .
+```
+
+Then work inside it with the repo bind-mounted:
+
+```sh
+docker run --rm -it \
+    -v "$PWD:/workspace" \
+    -v msgpack-zig-cache:/home/dev/.cache \
+    msgpack-zig-dev
+
+# inside the container:
+zig build test --release=safe
+zig build docs
+```
+
+The image carries no source of its own — `/workspace` is your checkout, so edits
+made on the host are what get compiled. The named volume holds Zig's global
+cache, which is what keeps rebuilds incremental between runs; the project's own
+`.zig-cache` (including the fuzz corpus) lives in the worktree as usual.
+
+Other Zig versions are one flag away, should you need to check behaviour against
+one: `--build-arg ZIG_VERSION=0.16.1 --build-arg ZLS_VERSION=0.16.1`. Zig
+tarballs are verified against the upstream minisign signature during the build.

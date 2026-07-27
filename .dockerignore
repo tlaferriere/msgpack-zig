@@ -1,0 +1,4 @@
+# The dev image installs tools only and mounts the worktree at run time, so
+# nothing here needs to reach the build context.
+*
+!Dockerfile
