@@ -230,6 +230,23 @@ test "fuzz unpack maps" {
                         m.deinit(testing.allocator);
                     } else |_| {}
                 }
+
+                // Both halves of an entry own memory here. The maps above
+                // cannot see a value leak at all — an entry that displaces a
+                // `u32` strands nothing — so a bug that drops a value on the
+                // floor stays invisible until the value type has something to
+                // drop. The duplicate-key leak was exactly that: fuzzing found
+                // the key half and could not have found the value half.
+                {
+                    var r = std.Io.Reader.fixed(input);
+                    var u = Unpacker.init(testing.allocator, &r);
+                    if (u.unpack_as(std.array_hash_map.String([]const u8))) |map| {
+                        var m = map;
+                        for (m.keys()) |key| testing.allocator.free(key);
+                        for (m.values()) |value| testing.allocator.free(value);
+                        m.deinit(testing.allocator);
+                    } else |_| {}
+                }
             }
         }.fuzz,
         .{},
