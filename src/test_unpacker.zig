@@ -989,3 +989,30 @@ test "Bounded: a value under the reserve cap decodes in one exact allocation" {
     const unpacked = try message.unpack_as([]const u8);
     try testing.expectEqualStrings(payload, unpacked);
 }
+
+// `list.append(gpa, x)` is `ensureUnusedCapacity(gpa, 1)` plus an assignment, so
+// the split below looks redundant. It is not, and the difference is argument
+// evaluation order: `append(gpa, try unpack_value(Child))` decodes the element
+// *before* reserving room for it, so an `OutOfMemory` from the growth drops an
+// element that already owns heap memory. Reserving first makes the append
+// infallible and the element's ownership transfer unconditional.
+//
+// This walks every allocation failure point of a decode whose elements own
+// memory, and reports leaked bytes if any of them strands one.
+test "Bounded: growing a slice of owning elements leaks nothing on failure" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn decode(allocator: std.mem.Allocator) !void {
+            // FixArray of three 4-byte FixStrs.
+            var r = std.Io.Reader.fixed("\x93" ++ "\xa4aaaa" ++ "\xa4bbbb" ++ "\xa4cccc");
+            // A reserve too small for even one element forces the list to grow
+            // mid-decode, which is where the interesting failures land.
+            var message = Unpacker.initWithOptions(allocator, &r, .{ .max_prealloc_bytes = 1 });
+            const unpacked = try message.unpack_as([][]const u8);
+            defer {
+                for (unpacked) |element| allocator.free(element);
+                allocator.free(unpacked);
+            }
+            try testing.expectEqual(@as(usize, 3), unpacked.len);
+        }
+    }.decode, .{});
+}

@@ -355,8 +355,11 @@ pub const Unpacker = struct {
             self.prealloc_count(Child, @intCast(count)),
         );
         for (0..@as(usize, @intCast(count))) |_| {
-            // Reserve before decoding, not after: an element that has been
-            // unpacked needs somewhere to go, or a failing append drops it.
+            // Deliberately not `append`, which is this same reserve plus an
+            // assignment: its argument is evaluated first, so the element would
+            // be decoded before there is room for it, and a growth that fails
+            // with OutOfMemory would drop an element already owning memory.
+            // Reserving first makes the append infallible.
             try list.ensureUnusedCapacity(self.allocator, 1);
             list.appendAssumeCapacity(try self.unpack_value(Child));
         }
