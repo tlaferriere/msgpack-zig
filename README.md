@@ -116,8 +116,27 @@ cache, which is what keeps rebuilds incremental between runs; the project's own
 Other Zig versions are one flag away, should you need to check behaviour against
 one: `--build-arg ZIG_VERSION=0.16.1 --build-arg ZLS_VERSION=0.16.1`. Left unset,
 `ZIG_VERSION` follows `.minimum_zig_version` in `build.zig.zon`, so the toolchain
-tracks the package rather than drifting from it. Zig tarballs are verified
-against the upstream minisign signature during the build.
+tracks the package rather than drifting from it.
+
+### Where Zig comes from
+
+`scripts/install-zig.sh` downloads Zig from a [community
+mirror](https://ziglang.org/download/community-mirrors/), picked at random from
+upstream's list, because ziglang.org's bandwidth is donated and upstream asks
+that automation stay off it. ziglang.org is used only if every mirror fails.
+
+Mirrors are run by volunteers, so nothing is trusted on arrival: each download
+is checked against Zig's minisign public key, and a mirror that serves anything
+that does not verify is skipped rather than used. The check is required — if
+`minisign` is missing the script installs it, and refuses to continue if it
+cannot. A few knobs, none of them normally needed:
+
+| Variable | Effect |
+| --- | --- |
+| `ZIG_MIRRORS` | Mirrors to use, whitespace separated. Skips discovery, which is what a network that only allows one host needs. |
+| `ZIG_MIRROR_LIST` | Where to discover mirrors, if not upstream's list. |
+| `ZIG_VERSION` | What to install, if not `.minimum_zig_version`. |
+| `ZIG_PREFIX`, `ZIG_BINDIR` | Where it lands. Defaults to `/opt/zig` and `/usr/local/bin`. |
 
 ### Pulling the image instead of building it
 
@@ -146,7 +165,10 @@ installed on top of the stock image instead, by a `SessionStart` hook in
 `.claude/settings.json` that runs `scripts/install-zig.sh` — the same installer
 the `Dockerfile` uses, so both paths land on the same compiler.
 
-That download needs `ziglang.org`, which is **not** on the default Trusted
-allowlist. Set the environment's network access to **Custom**, keep the default
-package-manager list, and add `ziglang.org`. Without it the hook reports the
-problem and the session still starts, but `zig build` will not work.
+That download needs to reach a mirror, and the mirror list itself lives on
+`ziglang.org` — neither is on the default Trusted allowlist. Set the
+environment's network access to **Custom**, keep the default package-manager
+list, and add `ziglang.org`. To stay off it entirely, allow a mirror's host
+instead and set `ZIG_MIRRORS` to that mirror in the environment's variables,
+which skips discovery. Without either, the hook reports the problem and the
+session still starts, but `zig build` will not work.

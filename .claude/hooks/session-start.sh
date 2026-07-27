@@ -19,13 +19,19 @@ if ! "${project_dir}/scripts/install-zig.sh"; then
     cat >&2 <<'EOF'
 session-start: could not install Zig.
 
-Zig is downloaded from ziglang.org, which is not on the Trusted network
-allowlist. In the environment's settings, set Network access to Custom, keep
-the default package-manager list, and add:
+Zig is downloaded from a community mirror, and the list of mirrors lives on
+ziglang.org. Neither is on the Trusted network allowlist. In the environment's
+settings, set Network access to Custom, keep the default package-manager list,
+and add:
 
     ziglang.org
 
-`zig build test` will not work in this session until then.
+To stay off ziglang.org entirely, allow a mirror's host instead and name it in
+the environment's variables, skipping discovery:
+
+    ZIG_MIRRORS=https://that-mirror.example/zig
+
+`zig build test` will not work in this session until one of those is done.
 EOF
 fi
 
