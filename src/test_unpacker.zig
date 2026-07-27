@@ -469,6 +469,49 @@ test "Deserialize FixMap" {
     );
 }
 
+// Nightly fuzzing hit this in `fuzz unpack maps`, as a leak rather than a
+// panic — the test process exits with code 1 and the testing allocator names
+// the unfreed block. Two crash inputs, both a map whose key repeats:
+//
+//     de 620a  aa 2a30…de62  0a   aa 2a30…de62  0a
+//     Map_16   FixStr(10)    val  same key      val
+//
+// Nothing in msgpack forbids a repeated key, so this has to decode. But the
+// map keeps the copy of the key it already has and the second one is decoded
+// into an allocation that no longer has an owner.
+test "Duplicate map keys do not leak the redundant key" {
+    // FixMap of 2 entries, both keyed "id".
+    var r = std.Io.Reader.fixed("\x82" ++ "\xa2id\x01" ++ "\xa2id\x02");
+    var message = Unpacker.init(testing.allocator, &r);
+    var unpacked = try message.unpack_as(std.array_hash_map.String(u32));
+    defer {
+        for (unpacked.keys()) |key| testing.allocator.free(key);
+        unpacked.deinit(testing.allocator);
+    }
+
+    // Last writer wins, and the map holds one entry rather than two.
+    try testing.expectEqual(@as(usize, 1), unpacked.count());
+    try testing.expectEqual(@as(?u32, 2), unpacked.get("id"));
+}
+
+// The same hazard on the value side: a repeated key displaces the value that
+// was already stored, and when values own memory that displaced one is just as
+// orphaned as the redundant key.
+test "Duplicate map keys do not leak the displaced value" {
+    // FixMap of 2 entries, both keyed "k", with string values.
+    var r = std.Io.Reader.fixed("\x82" ++ "\xa1k\xa3one" ++ "\xa1k\xa3two");
+    var message = Unpacker.init(testing.allocator, &r);
+    var unpacked = try message.unpack_as(std.array_hash_map.String([]const u8));
+    defer {
+        for (unpacked.keys()) |key| testing.allocator.free(key);
+        for (unpacked.values()) |value| testing.allocator.free(value);
+        unpacked.deinit(testing.allocator);
+    }
+
+    try testing.expectEqual(@as(usize, 1), unpacked.count());
+    try testing.expectEqualStrings("two", unpacked.get("k").?);
+}
+
 const MyDeserializeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
