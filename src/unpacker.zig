@@ -419,7 +419,17 @@ pub const Unpacker = struct {
             errdefer self.free_unpacked(key);
             const value = try self.unpack_value(@TypeOf(@as(As.KV, undefined).value));
             errdefer self.free_unpacked(value);
-            try map.put(self.allocator, key, value);
+            // Deliberately not `put`, which drops whatever it displaces on the
+            // floor: nothing forbids a message from repeating a key, and on a
+            // repeat the map keeps the copy of the key it already holds while
+            // overwriting the value. Both of the things it lets go were decoded
+            // by us and are ours to release.
+            const entry = try map.getOrPut(self.allocator, key);
+            if (entry.found_existing) {
+                self.free_unpacked(key);
+                self.free_unpacked(entry.value_ptr.*);
+            }
+            entry.value_ptr.* = value;
         }
         return map;
     }
