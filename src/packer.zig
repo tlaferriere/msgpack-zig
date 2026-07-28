@@ -347,7 +347,14 @@ pub const Packer = struct {
         // than from a second promise the type makes about them.
         var payload_buffer: std.Io.Writer.Allocating = .init(self.allocator);
         defer payload_buffer.deinit();
-        try @TypeOf(object).__msgpack__.pack_ext(object, &payload_buffer.writer);
+        @TypeOf(object).__msgpack__.pack_ext(object, &payload_buffer.writer) catch |err| switch (err) {
+            // The only writer `pack_ext` was handed writes into memory, and
+            // `Allocating` reports a failed allocation as `WriteFailed`. Passing
+            // that up as-is would present running out of memory as a failure of
+            // the caller's writer, which has not been touched yet.
+            error.WriteFailed => return error.OutOfMemory,
+            else => |e| return e,
+        };
         const payload = payload_buffer.written();
 
         const size = payload.len;

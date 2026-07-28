@@ -699,7 +699,7 @@ test "Serialize Ext_8 timestamp" {
 
 // The pack side of the boundary the unpacker tests cover. Neither of these
 // could be written before the field was widened: `u29` cannot hold either
-// value, so the `TooManyNanoseconds` guard in `packed_size` was unreachable.
+// value, so the `TooManyNanoseconds` guard was unreachable.
 test "Serialize FixExt_8 timestamp at the maximum legal nanoseconds" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
@@ -711,8 +711,9 @@ test "Serialize FixExt_8 timestamp at the maximum legal nanoseconds" {
 }
 
 // Above the limit there is no encoding to reach for, so packing has to refuse.
-// `write_ext` asks for `packed_size` before writing anything, so nothing has
-// reached the writer by the time the error surfaces.
+// `write_ext` buffers the payload before it can write a header derived from the
+// payload's length, so `pack_ext` refuses before anything has reached the
+// writer.
 test "Serialize timestamp over the nanosecond limit" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
@@ -723,4 +724,33 @@ test "Serialize timestamp over the nanosecond limit" {
         packer.pack(val),
     );
     try testing.expectEqualStrings("", aw.written());
+}
+
+// Packing an ext value buffers the payload so the length header can be written
+// ahead of it. That is an allocation the pack side did not used to make — the
+// payload arrived as a slice the type had already built — and it fails like any
+// other. A failure has to release the buffer rather than strand it.
+//
+// This walks every allocation failure point of such a pack and reports leaked
+// bytes if any of them loses the payload buffer or the writer's own.
+test "Packing an ext value leaks nothing when an allocation fails" {
+    try testing.checkAllAllocationFailures(testing.allocator, struct {
+        fn encode(allocator: std.mem.Allocator) !void {
+            // A fixed destination, so the payload buffer is the only allocation
+            // in play. An `Allocating` destination would fail here too, and its
+            // failure arrives as `WriteFailed` rather than `OutOfMemory`, which
+            // is not what this test is asking about.
+            var out: [512]u8 = undefined;
+            var writer = std.Io.Writer.fixed(&out);
+            var packer = Packer.init(&writer, allocator);
+
+            // Past 255 bytes, so the header is an ext_16 (marker, two length
+            // bytes, type) and the payload buffer grows more than once getting
+            // there.
+            try packer.pack(MyType{ .buf = "\xDE" ** 300 });
+            packer.finish();
+
+            try testing.expectEqual(@as(usize, 300 + 4), writer.end);
+        }
+    }.encode, .{});
 }
