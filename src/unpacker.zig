@@ -528,7 +528,18 @@ pub const Unpacker = struct {
         // A saturated `Limit` reads back as `.unlimited`, which can only happen
         // when `len` itself saturated, and `remaining` never exceeds `len`.
         const unread = limited.remaining.toInt() orelse metadata.len;
-        try self.reader.discardAll64(unread);
+
+        // This step must not fail. By now the callback has returned a value, and
+        // the library has no way to release one — `free_unpacked` stops at
+        // structs precisely because it cannot know what an ext type owns. Any
+        // error raised here would strand whatever that value allocated, which a
+        // frame declaring more payload than it carries could then be used to
+        // leak on demand.
+        //
+        // So it skips what is actually there and does not mind getting less.
+        // A frame that came up short is still a broken stream: the reader ends
+        // up at the end of what it had, and the next read is what reports it.
+        _ = self.reader.discardShort(unread) catch {};
 
         return value;
     }

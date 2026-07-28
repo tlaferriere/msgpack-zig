@@ -1259,3 +1259,45 @@ test "An ext callback can take the full published reader capacity at once" {
     try testing.expectEqual(@as(u8, 0xAB), unpacked.first);
     try testing.expectEqual(@as(u8, 0xCD), unpacked.last);
 }
+
+// A truncated ext value: the header declares more payload than the stream
+// actually holds. The callback reads only part of it and succeeds, allocating
+// as it goes; the library then tries to skip the rest and runs out of stream.
+//
+// The decode fails either way. The question is what happens to what the
+// callback already allocated on its way to succeeding.
+const TruncExt = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x74 };
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !TruncExt {
+            _ = len;
+            // Deliberately less than the declared length, and little enough to
+            // still be there in a truncated stream.
+            return TruncExt{ .buf = try reader.readAlloc(allocator, 2) };
+        }
+    };
+};
+
+test "Deserialize a truncated ext strands nothing the callback allocated" {
+    // ext_8, declared length 10, type 0x74 — then only four payload bytes.
+    var r = std.Io.Reader.fixed("\xc7\x0A\x74" ++ "\x01\x02\x03\x04");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    // The callback got the two bytes it asked for, so it succeeds and its value
+    // comes back owning them. Skipping the six bytes the header promised but the
+    // stream never had cannot fail the decode here: there would be no way to
+    // release this value if it did, and `testing.allocator` is what says so.
+    const unpacked = try message.unpack_as(TruncExt);
+    testing.allocator.free(unpacked.buf);
+
+    // The frame was still short, and the reader is left at the end of what it
+    // actually had — so the next read is where that surfaces.
+    try testing.expectError(error.EndOfStream, message.unpack_as(u8));
+}
