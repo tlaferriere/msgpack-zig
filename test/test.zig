@@ -205,7 +205,12 @@ const MyType = struct {
             try writer.writeAll(self.buf);
         }
 
-        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MyType {
+            const data = try reader.readAlloc(allocator, len);
             errdefer allocator.free(data);
             for (data) |b| {
                 if (b == 0xFF) {

@@ -518,7 +518,12 @@ const MyType = struct {
 
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = 0x71 };
-        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MyType {
+            const data = try reader.readAlloc(allocator, len);
             errdefer allocator.free(data);
             for (data) |b| {
                 if (b == 0xFF) {

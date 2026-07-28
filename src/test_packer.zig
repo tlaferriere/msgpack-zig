@@ -545,10 +545,10 @@ const MyType = struct {
 
         pub fn unpack_ext(
             allocator: std.mem.Allocator,
-            buf: []const u8,
+            reader: *std.Io.Reader,
+            len: usize,
         ) !MyType {
-            errdefer allocator.free(buf);
-            return MyType{ .buf = buf };
+            return MyType{ .buf = try reader.readAlloc(allocator, len) };
         }
     };
 };

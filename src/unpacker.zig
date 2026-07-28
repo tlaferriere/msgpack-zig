@@ -494,12 +494,13 @@ pub const Unpacker = struct {
     fn unpack_ext(self: *Unpacker, comptime As: type, comptime type_id: i8, comptime callback: anytype) !As {
         const metadata = try self.ext_decode();
         if (metadata.type_id != type_id) return DeserializeError.WrongExtType;
+        // Charging before the callback runs is what bounds it: whatever the
+        // callback chooses to allocate, it is working from a length that already
+        // fits inside `max_message_bytes`. It is not held to `max_prealloc_bytes`
+        // the way the library's own decoding is — that is the callback's call to
+        // make, and `len` is given to it so it can make it.
         try self.charge(metadata.len, 1);
-        // `read_bytes` frees on its own error path, so `slice` only reaches
-        // `callback` complete — and from there ownership is the callback's, which
-        // frees it if it fails.
-        const slice = try self.read_bytes(metadata.len);
-        return callback(self.allocator, slice);
+        return callback(self.allocator, self.reader, metadata.len);
     }
 
     const ExtMetadata = struct { type_id: i8, len: usize };

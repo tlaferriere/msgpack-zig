@@ -37,6 +37,7 @@ fn roundTrip(comptime T: type, val: anytype) !T {
 
 /// Extension type with an opaque byte payload. Unlike `MyType` in the
 /// integration tests, this one accepts every payload, so round-trips are total.
+/// The unpacked value owns `buf`, so callers free it.
 const MyExt = struct {
     buf: []const u8,
 
@@ -47,9 +48,12 @@ const MyExt = struct {
             try writer.writeAll(self.buf);
         }
 
-        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyExt {
-            _ = allocator;
-            return MyExt{ .buf = data };
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MyExt {
+            return MyExt{ .buf = try reader.readAlloc(allocator, len) };
         }
     };
 };
@@ -249,8 +253,8 @@ test "fuzz unpack maps" {
 
 // Feed random bytes to the Unpacker as user-defined types: a map-repr struct
 // (`unpack_map_as_struct`, which allocates a key string per field) and an
-// ext-repr struct (`unpack_ext`, which allocates the payload before handing
-// ownership to the callback).
+// ext-repr struct (`unpack_ext`, where the callback reads its own payload and
+// allocates whatever it decides to keep).
 test "fuzz unpack structs" {
     try testing.fuzz(
         {},
