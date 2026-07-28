@@ -11,9 +11,24 @@
 //!   2. Structured round-trips — pack→unpack→verify for every supported type.
 //!   3. Mutation — pack a valid message, flip one byte, unpack.
 //!
-//! Note: `--release=safe` is required because Debug mode enables additional
-//! safety checks (e.g. bounds checking) that can cause false-positive panics
-//! when the fuzzer feeds deliberately malformed input.
+//! `--fuzz` fuzzes one test at a time, so an unfiltered run spends everything on
+//! whichever it picks first and leaves the rest at zero. Use `-Dfuzz-filter` to
+//! name a target, and rotate across them to cover the file:
+//!
+//!     zig build test --release=safe -Dfuzz-filter="round-trip ext" --fuzz
+//!
+//! `--release=safe` is required, and the other modes fail for their own reasons.
+//! Debug does not compile: Zig 0.16's test runner hands `@errorReturnTrace()`'s
+//! `*builtin.StackTrace` to `std.debug.writeStackTrace`, which takes a
+//! `*const debug.StackTrace`, and that branch is only analyzed where error
+//! return traces exist. ReleaseSmall strips the debug info the fuzzer reads
+//! coverage from.
+//!
+//! ReleaseFast does build and run — do not use it. Safety checks are what most
+//! of these targets detect bugs *with*, and it turns them off. The timestamp
+//! overflow these tests found surfaced as an `@intCast` panic; under
+//! ReleaseFast the same cast is undefined behaviour and the target sails past
+//! it.
 const std = @import("std");
 const testing = std.testing;
 
