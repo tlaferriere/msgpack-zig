@@ -6,6 +6,7 @@ const Packer = @import("packer.zig").Packer;
 const Repr = @import("root.zig").Repr;
 const SerializeError = @import("packer.zig").SerializeError;
 const Timestamp = @import("root.zig").Timestamp;
+const Unpacker = @import("unpacker.zig").Unpacker;
 
 test "Serialize u7 to 7-bit positive fixint" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
@@ -643,6 +644,63 @@ test "Serialize Ext_32 right type" {
     try packer.pack(val);
     const actual = aw.written();
     try testing.expectEqualStrings("\xc9\x00\x01\x00\x00\x71" ++ content, actual);
+}
+
+// `packed_size` and `pack_ext` are two separate promises about the same value,
+// and nothing makes them agree.
+const LyingType = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr =
+            Repr{ .ext = 0x72 };
+
+        pub fn pack_ext(
+            self: LyingType,
+            allocator: std.mem.Allocator,
+        ) ![]const u8 {
+            const out = try allocator.alloc(u8, self.buf.len);
+            @memcpy(out, self.buf);
+            return out;
+        }
+
+        /// Declares half of what `pack_ext` goes on to write.
+        pub fn packed_size(self: LyingType) !usize {
+            return self.buf.len / 2;
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            buf: []const u8,
+        ) !LyingType {
+            errdefer allocator.free(buf);
+            return LyingType{ .buf = buf };
+        }
+    };
+};
+
+test "Serialize ext whose packed_size understates pack_ext" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+
+    // Eight bytes of payload behind a header that will declare four.
+    try packer.pack(LyingType{ .buf = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF" });
+    // A second value, which a reader must still be able to find afterwards.
+    try packer.pack(@as(i32, 0x0EADBEEF));
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(LyingType);
+    testing.allocator.free(unpacked.buf);
+
+    // The four payload bytes the header did not account for are still sitting in
+    // the stream, so this reads them as if they were the next value.
+    try testing.expectEqual(
+        @as(i32, 0x0EADBEEF),
+        try message.unpack_as(i32),
+    );
 }
 
 test "Serialize FixExt_4 timestamp" {
