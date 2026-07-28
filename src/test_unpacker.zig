@@ -1301,3 +1301,39 @@ test "Deserialize a truncated ext strands nothing the callback allocated" {
     // actually had — so the next read is where that surfaces.
     try testing.expectError(error.EndOfStream, message.unpack_as(u8));
 }
+
+// The struct-shaped decode is the closest neighbour to the map one, and it
+// resolves a repeated key differently: the field leaves `fields_to_fill` once
+// filled, so seeing it again is `WrongFields` rather than an overwrite. That
+// means there is no displaced value to lose — but it does have to unwind the
+// fields it already filled, and free the key that failed.
+const OwningStruct = struct {
+    a: []const u8,
+    b: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr.map;
+    };
+};
+
+test "A repeated struct field unwinds without stranding anything" {
+    // FixMap of 2: "a" => "xx", "a" => "yy". The second "a" is the failure.
+    var r = std.Io.Reader.fixed("\x82" ++ "\xa1a" ++ "\xa2xx" ++ "\xa1a" ++ "\xa2yy");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    try testing.expectError(
+        DeserializeError.WrongFields,
+        message.unpack_as(OwningStruct),
+    );
+}
+
+test "An unknown struct field unwinds without stranding anything" {
+    // FixMap of 2: "a" => "xx", then a key the struct does not have.
+    var r = std.Io.Reader.fixed("\x82" ++ "\xa1a" ++ "\xa2xx" ++ "\xa1z" ++ "\xa2yy");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    try testing.expectError(
+        DeserializeError.WrongFields,
+        message.unpack_as(OwningStruct),
+    );
+}
