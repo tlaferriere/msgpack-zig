@@ -500,7 +500,26 @@ pub const Unpacker = struct {
         // the way the library's own decoding is — that is the callback's call to
         // make, and `len` is given to it so it can make it.
         try self.charge(metadata.len, 1);
-        return callback(self.allocator, self.reader, metadata.len);
+
+        // The callback gets a reader that ends where its payload does, so
+        // reading too far fails on its own rather than eating the next value.
+        // The buffer has to hold the widest single `takeInt` a callback might
+        // do; `Timestamp` reads a u64, and `takeInt` asserts the capacity.
+        var buf: [16]u8 = undefined;
+        var limited = self.reader.limited(.limited64(metadata.len), &buf);
+        const value = callback(self.allocator, &limited.interface, metadata.len);
+
+        // Whatever the callback did not read is still payload, and leaving it
+        // in the stream would hand it to the next value. `remaining` counts only
+        // the bytes never pulled from the underlying reader — anything buffered
+        // above is already consumed from it — so this realigns exactly.
+        //
+        // A saturated `Limit` reads back as `.unlimited`, which can only happen
+        // when `len` itself saturated, and `remaining` never exceeds `len`.
+        const unread = limited.remaining.toInt() orelse metadata.len;
+        try self.reader.discardAll64(unread);
+
+        return value;
     }
 
     const ExtMetadata = struct { type_id: i8, len: usize };
