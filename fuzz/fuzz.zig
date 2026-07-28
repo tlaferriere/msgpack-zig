@@ -93,6 +93,34 @@ const MisreadExt = struct {
     };
 };
 
+/// How many bytes `PartialExt`'s callback keeps. The fuzzer sets it before each
+/// round.
+var partial_take: usize = 0;
+
+/// Ext type whose callback keeps a fuzzer-chosen slice of its payload. Unlike
+/// `MisreadExt` this one allocates, so a frame the library cannot finish
+/// processing has something outstanding to strand.
+const PartialExt = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = msgpack.Repr{ .ext = 0x75 };
+
+        pub fn pack_ext(self: PartialExt, writer: *std.Io.Writer) !void {
+            try writer.writeAll(self.buf);
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !PartialExt {
+            const want = @min(partial_take, len);
+            return PartialExt{ .buf = try reader.readAlloc(allocator, want) };
+        }
+    };
+};
+
 /// Struct serialized as a map of field name → value.
 const MyStruct = struct {
     a: u32,
@@ -680,6 +708,54 @@ test "fuzz ext callback misreads its payload" {
                 var u = Unpacker.init(testing.allocator, &r);
                 _ = u.unpack_as(MisreadExt) catch {};
                 try testing.expectEqual(@as(u32, 0xDEADBEEF), try u.unpack_as(u32));
+            }
+        }.fuzz,
+        .{},
+    );
+}
+
+// Ext frames built by hand, with the declared length drawn independently of how
+// many payload bytes actually follow. Truncated frames, over-long frames and
+// zero-length ones all fall out of that, which the round-trip targets cannot
+// produce because they only ever emit headers that match their payload.
+//
+// The callback keeps a fuzzer-chosen part of the payload, so a frame the
+// library cannot finish has a live allocation at the moment it gives up —
+// which is the shape a truncated frame used to leak.
+test "fuzz adversarial ext frames" {
+    try testing.fuzz(
+        {},
+        struct {
+            fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
+                _ = ctx;
+
+                var payload: [512]u8 = undefined;
+                const avail = smith.slice(&payload);
+                // Deliberately unrelated to `avail`, and allowed past it.
+                const declared = smith.valueRangeAtMost(u32, 0, 600);
+                partial_take = smith.valueRangeAtMost(u32, 0, 600);
+
+                // ext_32, so any drawn length is expressible in the header.
+                var frame: [6 + payload.len]u8 = undefined;
+                frame[0] = 0xc9;
+                std.mem.writeInt(u32, frame[1..5], declared, .big);
+                frame[5] = 0x75;
+                @memcpy(frame[6..][0..avail], payload[0..avail]);
+
+                // A private allocator per iteration, because `testing.allocator`
+                // only reports leaks when the test tears down — which never
+                // happens while the fuzzer is looping, so a leak inside an
+                // iteration would go unseen. This one is checked every round.
+                var gpa: std.heap.DebugAllocator(.{}) = .init;
+                const alloc = gpa.allocator();
+                {
+                    var r = std.Io.Reader.fixed(frame[0 .. 6 + avail]);
+                    var u = Unpacker.init(alloc, &r);
+                    if (u.unpack_as(PartialExt)) |v| {
+                        alloc.free(v.buf);
+                    } else |_| {}
+                }
+                try testing.expect(gpa.deinit() == .ok);
             }
         }.fuzz,
         .{},
