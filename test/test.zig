@@ -192,7 +192,6 @@ test "32-bit length map round-trip" {
 
 const MyDeserializeError = error{OhNo};
 const MySerializeError = error{OhNo};
-const MySizeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
@@ -201,15 +200,9 @@ const MyType = struct {
 
         pub fn pack_ext(
             self: MyType,
-            allocator: std.mem.Allocator,
-        ) ![]const u8 {
-            const out = try allocator.alloc(u8, self.buf.len);
-            @memcpy(out, self.buf);
-            return out;
-        }
-
-        pub fn packed_size(self: MyType) !usize {
-            return self.buf.len;
+            writer: *std.Io.Writer,
+        ) !void {
+            try writer.writeAll(self.buf);
         }
 
         pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {

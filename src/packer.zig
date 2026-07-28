@@ -341,7 +341,16 @@ pub const Packer = struct {
     }
 
     fn write_ext(self: *Packer, object: anytype, ext: i8) !void {
-        const size = try @TypeOf(object).__msgpack__.packed_size(object);
+        // The length belongs in the header, ahead of the payload, so the payload
+        // has to exist before any of it can be written. Buffering it here is what
+        // keeps the two consistent: the header is computed from the bytes rather
+        // than from a second promise the type makes about them.
+        var payload_buffer: std.Io.Writer.Allocating = .init(self.allocator);
+        defer payload_buffer.deinit();
+        try @TypeOf(object).__msgpack__.pack_ext(object, &payload_buffer.writer);
+        const payload = payload_buffer.written();
+
+        const size = payload.len;
         const mark =
             switch (size) {
                 1 => Marker{ .FixExt_1 = 0 },
@@ -375,8 +384,6 @@ pub const Packer = struct {
 
         try self.writer.writeByte(@bitCast(ext));
 
-        const custom_buffer = try @TypeOf(object).__msgpack__.pack_ext(object, self.allocator);
-        defer self.allocator.free(custom_buffer);
-        try self.writer.writeAll(custom_buffer);
+        try self.writer.writeAll(payload);
     }
 };

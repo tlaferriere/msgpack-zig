@@ -22,22 +22,12 @@ pub const Timestamp = struct {
 
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = -1 };
-        pub fn pack_ext(self: Timestamp, alloc: std.mem.Allocator) ![]const u8 {
+        pub fn pack_ext(self: Timestamp, writer: *std.Io.Writer) !void {
             if (self.nanoseconds == 0 and
                 self.seconds >= 0 and
                 self.seconds <= std.math.maxInt(u32))
             {
-                const buf = try alloc.alloc(u8, 4);
-                std.mem.writeInt(
-                    u32,
-                    std.mem.bytesAsValue(
-                        [4]u8,
-                        buf,
-                    ),
-                    @intCast(self.seconds),
-                    Endian.big,
-                );
-                return buf;
+                return writer.writeInt(u32, @intCast(self.seconds), Endian.big);
             }
 
             if (self.nanoseconds > 999_999_999) {
@@ -47,58 +37,11 @@ pub const Timestamp = struct {
             if (self.seconds >= 0 and self.seconds <= std.math.maxInt(u34)) {
                 const combined: u64 = (@as(u64, self.nanoseconds) << 34) |
                     @as(u64, @intCast(self.seconds));
-                const buf = try alloc.alloc(u8, 8);
-                std.mem.writeInt(
-                    u64,
-                    std.mem.bytesAsValue(
-                        [8]u8,
-                        buf,
-                    ),
-                    @intCast(combined),
-                    Endian.big,
-                );
-                return buf;
+                return writer.writeInt(u64, combined, Endian.big);
             }
 
-            const buf = try alloc.alloc(u8, 12);
-            std.mem.writeInt(
-                u32,
-                std.mem.bytesAsValue(
-                    [4]u8,
-                    buf[0..4],
-                ),
-                self.nanoseconds,
-                Endian.big,
-            );
-            std.mem.writeInt(
-                i64,
-                std.mem.bytesAsValue(
-                    [8]u8,
-                    buf[4..12],
-                ),
-                self.seconds,
-                Endian.big,
-            );
-            return buf;
-        }
-
-        pub fn packed_size(self: Timestamp) !usize {
-            if (self.nanoseconds == 0 and
-                self.seconds >= 0 and
-                self.seconds <= std.math.maxInt(u32))
-            {
-                return 4;
-            }
-
-            if (self.nanoseconds > 999_999_999) {
-                return Error.TooManyNanoseconds;
-            }
-
-            if (self.seconds >= 0 and self.seconds <= std.math.maxInt(u34)) {
-                return 8;
-            }
-
-            return 12;
+            try writer.writeInt(u32, self.nanoseconds, Endian.big);
+            try writer.writeInt(i64, self.seconds, Endian.big);
         }
 
         pub fn unpack_ext(allocator: std.mem.Allocator, buffer: []const u8) !Timestamp {

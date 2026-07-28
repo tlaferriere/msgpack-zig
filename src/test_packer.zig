@@ -529,7 +529,6 @@ test "Serialize FixMap" {
 }
 
 const MySerializeError = error{OhNo};
-const MySizeError = error{OhNo};
 const MyType = struct {
     buf: []const u8,
 
@@ -539,15 +538,9 @@ const MyType = struct {
 
         pub fn pack_ext(
             self: MyType,
-            allocator: std.mem.Allocator,
-        ) ![]const u8 {
-            const out = try allocator.alloc(u8, self.buf.len);
-            @memcpy(out, self.buf);
-            return out;
-        }
-
-        pub fn packed_size(self: MyType) !usize {
-            return self.buf.len;
+            writer: *std.Io.Writer,
+        ) !void {
+            try writer.writeAll(self.buf);
         }
 
         pub fn unpack_ext(
@@ -646,61 +639,32 @@ test "Serialize Ext_32 right type" {
     try testing.expectEqualStrings("\xc9\x00\x01\x00\x00\x71" ++ content, actual);
 }
 
-// `packed_size` and `pack_ext` are two separate promises about the same value,
-// and nothing makes them agree.
-const LyingType = struct {
-    buf: []const u8,
+test "Serialize ext header accounts for every byte pack_ext wrote" {
+    // Lengths either side of the fixext sizes, and across the ext_8/ext_16
+    // boundary, since each picks a differently shaped header.
+    inline for (.{ 0, 1, 2, 3, 4, 8, 16, 17, 255, 256 }) |len| {
+        const content = "\xDE" ** len;
+        var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer aw.deinit();
+        var packer = Packer.init(&aw.writer, testing.allocator);
 
-    pub const __msgpack__ = struct {
-        pub const repr =
-            Repr{ .ext = 0x72 };
+        try packer.pack(MyType{ .buf = content });
+        // A second value, which a reader must still be able to find afterwards.
+        try packer.pack(@as(i32, 0x0EADBEEF));
+        packer.finish();
 
-        pub fn pack_ext(
-            self: LyingType,
-            allocator: std.mem.Allocator,
-        ) ![]const u8 {
-            const out = try allocator.alloc(u8, self.buf.len);
-            @memcpy(out, self.buf);
-            return out;
-        }
+        var r = std.Io.Reader.fixed(aw.written());
+        var message = Unpacker.init(testing.allocator, &r);
+        const unpacked = try message.unpack_as(MyType);
+        testing.allocator.free(unpacked.buf);
 
-        /// Declares half of what `pack_ext` goes on to write.
-        pub fn packed_size(self: LyingType) !usize {
-            return self.buf.len / 2;
-        }
-
-        pub fn unpack_ext(
-            allocator: std.mem.Allocator,
-            buf: []const u8,
-        ) !LyingType {
-            errdefer allocator.free(buf);
-            return LyingType{ .buf = buf };
-        }
-    };
-};
-
-test "Serialize ext whose packed_size understates pack_ext" {
-    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
-    defer aw.deinit();
-    var packer = Packer.init(&aw.writer, testing.allocator);
-
-    // Eight bytes of payload behind a header that will declare four.
-    try packer.pack(LyingType{ .buf = "\xDE\xAD\xBE\xEF\xDE\xAD\xBE\xEF" });
-    // A second value, which a reader must still be able to find afterwards.
-    try packer.pack(@as(i32, 0x0EADBEEF));
-    packer.finish();
-
-    var r = std.Io.Reader.fixed(aw.written());
-    var message = Unpacker.init(testing.allocator, &r);
-    const unpacked = try message.unpack_as(LyingType);
-    testing.allocator.free(unpacked.buf);
-
-    // The four payload bytes the header did not account for are still sitting in
-    // the stream, so this reads them as if they were the next value.
-    try testing.expectEqual(
-        @as(i32, 0x0EADBEEF),
-        try message.unpack_as(i32),
-    );
+        // Reaching the next value intact is what says the header declared
+        // exactly the number of bytes that followed it.
+        try testing.expectEqual(
+            @as(i32, 0x0EADBEEF),
+            try message.unpack_as(i32),
+        );
+    }
 }
 
 test "Serialize FixExt_4 timestamp" {

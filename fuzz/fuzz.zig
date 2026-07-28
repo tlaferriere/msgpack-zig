@@ -43,14 +43,8 @@ const MyExt = struct {
     pub const __msgpack__ = struct {
         pub const repr = msgpack.Repr{ .ext = 0x71 };
 
-        pub fn pack_ext(self: MyExt, allocator: std.mem.Allocator) ![]const u8 {
-            const out = try allocator.alloc(u8, self.buf.len);
-            @memcpy(out, self.buf);
-            return out;
-        }
-
-        pub fn packed_size(self: MyExt) !usize {
-            return self.buf.len;
+        pub fn pack_ext(self: MyExt, writer: *std.Io.Writer) !void {
+            try writer.writeAll(self.buf);
         }
 
         pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyExt {
