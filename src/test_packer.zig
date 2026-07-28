@@ -754,3 +754,46 @@ test "Packing an ext value leaks nothing when an allocation fails" {
         }
     }.encode, .{});
 }
+
+// fixstr covers lengths 0 through 31, so 31 bytes is the last length that fits
+// in a one-byte header. The bound was written as `len < maxInt(u5)`, which
+// stops at 30 and pushes 31 out to a str_8 — a valid encoding, a byte longer
+// than it needs to be, and not what any other implementation emits.
+//
+// The array and map headers next to it use `<=` for the same boundary, so this
+// is also an inconsistency within the packer. Round-trips cannot see it: a
+// str_8 decodes back to the same string.
+test "Serialize a 31-byte string as a fixstr" {
+    const val = "a" ** 31;
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(val);
+    packer.finish();
+
+    // 0xa0 | 31
+    try testing.expectEqualStrings("\xbf" ++ val, aw.written());
+}
+
+// The length either side of it, to pin that the boundary moved rather than
+// shifted.
+test "Serialize strings either side of the fixstr boundary" {
+    {
+        const val = "b" ** 30;
+        var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer aw.deinit();
+        var packer = Packer.init(&aw.writer, testing.allocator);
+        try packer.pack(val);
+        packer.finish();
+        try testing.expectEqualStrings("\xbe" ++ val, aw.written());
+    }
+    {
+        const val = "c" ** 32;
+        var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+        defer aw.deinit();
+        var packer = Packer.init(&aw.writer, testing.allocator);
+        try packer.pack(val);
+        packer.finish();
+        try testing.expectEqualStrings("\xd9\x20" ++ val, aw.written());
+    }
+}
