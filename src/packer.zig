@@ -172,7 +172,7 @@ pub const Packer = struct {
 
     fn write_string_header(self: *Packer, len: usize) !void {
         const mark =
-            if (len < maxInt(u5))
+            if (len <= maxInt(u5))
                 Marker{ .FixStr = @intCast(len) }
             else if (len <= maxInt(u8))
                 Marker{ .Str_8 = 0 }
