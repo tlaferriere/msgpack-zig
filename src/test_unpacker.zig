@@ -667,6 +667,90 @@ test "Deserialize Ext_32 right type" {
     );
 }
 
+// An ext callback is handed the reader, and the payload it was called for is
+// only a stretch of that reader. Nothing about the reader says where the
+// payload stops, so these two types read the wrong amount on purpose.
+
+/// Reads one byte more than its payload.
+const GreedyType = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x73 };
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !GreedyType {
+            return GreedyType{ .buf = try reader.readAlloc(allocator, len + 1) };
+        }
+    };
+};
+
+/// Reads only the first byte of its payload, however long it is.
+const LazyType = struct {
+    first: u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x74 };
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !LazyType {
+            _ = allocator;
+            _ = len;
+            return LazyType{ .first = try reader.takeByte() };
+        }
+    };
+};
+
+test "Deserialize ext callback reading past its payload" {
+    // FixExt_2 of "\xAA\xBB", then 0x2A as the next value.
+    var r = std.Io.Reader.fixed("\xd5\x73\xAA\xBB\x2A");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    // The third byte the callback asks for belongs to the next value, not to
+    // this payload, so it must not be there to read.
+    try testing.expectError(
+        error.EndOfStream,
+        message.unpack_as(GreedyType),
+    );
+
+    try testing.expectEqual(@as(u8, 0x2A), try message.unpack_as(u8));
+}
+
+test "Deserialize ext callback reading less than its payload" {
+    // FixExt_4 of "\xAA\xBB\xCC\xDD", then 0x2A as the next value.
+    var r = std.Io.Reader.fixed("\xd6\x74\xAA\xBB\xCC\xDD\x2A");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    const unpacked = try message.unpack_as(LazyType);
+    try testing.expectEqual(@as(u8, 0xAA), unpacked.first);
+
+    // The three bytes the callback left behind are still payload. Whoever
+    // reads next must not be the one to find them.
+    try testing.expectEqual(@as(u8, 0x2A), try message.unpack_as(u8));
+}
+
+// The test above leaves a payload short enough that it fits whatever buffer the
+// callback's reader is given, so the unread tail is pulled out of the stream as
+// a side effect of buffering it. That hides the case this one is for: a payload
+// longer than that buffer leaves bytes that were never fetched at all, and only
+// discarding them explicitly puts the stream back where it belongs.
+test "Deserialize ext callback reading less than a payload past the buffer" {
+    const len = 64;
+    const content = "\xAA" ** len;
+    // Ext_8 of 64 bytes, then 0x2A as the next value.
+    var r = std.Io.Reader.fixed("\xc7\x40\x74" ++ content ++ "\x2A");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    const unpacked = try message.unpack_as(LazyType);
+    try testing.expectEqual(@as(u8, 0xAA), unpacked.first);
+
+    try testing.expectEqual(@as(u8, 0x2A), try message.unpack_as(u8));
+}
+
 test "Deserialize Timestamp 32" {
     var r = std.Io.Reader.fixed("\xd6\xFF\xDE\xAD\xBE\xEF");
     var message = Unpacker.init(testing.allocator, &r);
