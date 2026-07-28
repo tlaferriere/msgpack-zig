@@ -6,6 +6,8 @@ const DeserializeError = @import("unpacker.zig").DeserializeError;
 const Repr = @import("root.zig").Repr;
 const Timestamp = @import("root.zig").Timestamp;
 const Unpacker = @import("unpacker.zig").Unpacker;
+const Packer = @import("packer.zig").Packer;
+const ext_reader_capacity = @import("unpacker.zig").ext_reader_capacity;
 
 test "Deserialize false" {
     var r = std.Io.Reader.fixed("\xc2");
@@ -1207,4 +1209,53 @@ test "Bounded: growing a slice of owning elements leaks nothing on failure" {
             try testing.expectEqual(@as(usize, 3), unpacked.len);
         }
     }.decode, .{});
+}
+
+// The reader an ext callback is given is built with a fixed buffer, and
+// `std.Io.Reader`'s buffered reads assert against that capacity rather than
+// returning an error — so a callback asking for a wider contiguous chunk aborts
+// the process instead of failing. The capacity is published for that reason,
+// and this pins it: a callback reading exactly `ext_reader_capacity` bytes in
+// one `takeArray` has to work.
+//
+// If this ever needs lowering, that is a breaking change for callbacks, not an
+// implementation detail.
+const WideExt = struct {
+    first: u8,
+    last: u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x73 };
+
+        pub fn pack_ext(self: WideExt, writer: *std.Io.Writer) !void {
+            _ = self;
+            try writer.writeAll("\xAB" ** (ext_reader_capacity - 1) ++ "\xCD");
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !WideExt {
+            _ = allocator;
+            _ = len;
+            const chunk = try reader.takeArray(ext_reader_capacity);
+            return WideExt{ .first = chunk[0], .last = chunk[chunk.len - 1] };
+        }
+    };
+};
+
+test "An ext callback can take the full published reader capacity at once" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(WideExt{ .first = 0, .last = 0 });
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(WideExt);
+
+    try testing.expectEqual(@as(u8, 0xAB), unpacked.first);
+    try testing.expectEqual(@as(u8, 0xCD), unpacked.last);
 }

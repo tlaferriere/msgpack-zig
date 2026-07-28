@@ -17,6 +17,19 @@ pub const DeserializeError = error{
     MessageTooLong,
 };
 
+/// Buffer capacity of the reader an `unpack_ext` callback is given.
+///
+/// `std.Io.Reader`'s buffered reads — `take`, `takeArray`, `takeInt`, `peek` —
+/// assert that the reader was built with at least that many bytes of capacity,
+/// so this is the widest contiguous read a callback may make that way. Asking
+/// for more is an assertion failure inside `std`, not an error a callback can
+/// catch, which is why the number is public and pinned by a test.
+///
+/// Reads that do not go through the buffer — `readSliceAll`, `readAlloc`,
+/// `allocRemaining`, `discardAll` — are unaffected, and are what a payload
+/// larger than this should use.
+pub const ext_reader_capacity = 64;
+
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
     reader: *std.Io.Reader,
@@ -503,9 +516,7 @@ pub const Unpacker = struct {
 
         // The callback gets a reader that ends where its payload does, so
         // reading too far fails on its own rather than eating the next value.
-        // The buffer has to hold the widest single `takeInt` a callback might
-        // do; `Timestamp` reads a u64, and `takeInt` asserts the capacity.
-        var buf: [16]u8 = undefined;
+        var buf: [ext_reader_capacity]u8 = undefined;
         var limited = self.reader.limited(.limited64(metadata.len), &buf);
         const value = callback(self.allocator, &limited.interface, metadata.len);
 
