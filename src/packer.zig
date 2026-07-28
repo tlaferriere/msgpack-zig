@@ -361,7 +361,10 @@ pub const Packer = struct {
                 0, 3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
                 maxInt(u8) + 1...maxInt(u16) => Marker{ .Ext_16 = 0 },
                 maxInt(u16) + 1...maxInt(u32) => Marker{ .Ext_32 = 0 },
-                else => unreachable,
+                // ext_32 is the widest header msgpack has, so a payload past
+                // `maxInt(u32)` has no way to be framed. Reachable wherever
+                // `usize` is wider than 32 bits.
+                else => return SerializeError.ExtTooLarge,
             };
 
         try self.writer.writeByte(marker.encode(mark));
