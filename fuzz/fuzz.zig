@@ -58,6 +58,41 @@ const MyExt = struct {
     };
 };
 
+/// How many bytes `MisreadExt`'s callback will try to take. The fuzzer sets it
+/// before each round; the library has to leave the stream positioned after the
+/// payload whether that is too much, too little, or exactly right.
+var misread_take: usize = 0;
+
+/// Extension type whose callback deliberately reads the wrong amount. It keeps
+/// nothing, so the value it returns does not matter — the point is where the
+/// stream is left once the callback is done with it.
+const MisreadExt = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = msgpack.Repr{ .ext = 0x72 };
+
+        pub fn pack_ext(self: MisreadExt, writer: *std.Io.Writer) !void {
+            try writer.writeAll(self.buf);
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MisreadExt {
+            _ = allocator;
+            _ = len;
+            var sink: [8192]u8 = undefined;
+            const want = @min(misread_take, sink.len);
+            // Over-reading is supposed to fail rather than reach the next value,
+            // so failing here is a valid outcome, not a finding.
+            _ = reader.readSliceShort(sink[0..want]) catch {};
+            return MisreadExt{ .buf = &.{} };
+        }
+    };
+};
+
 /// Struct serialized as a map of field name → value.
 const MyStruct = struct {
     a: u32,
@@ -610,6 +645,41 @@ test "fuzz round-trip ext" {
                 const result = try roundTrip(MyExt, val);
                 defer testing.allocator.free(result.buf);
                 try testing.expectEqualStrings(val.buf, result.buf);
+            }
+        }.fuzz,
+        .{},
+    );
+}
+
+// Keeping the stream aligned across an ext value is the library's job, not the
+// callback's. Draw a payload and an unrelated number of bytes for the callback
+// to take, then check the value *after* the ext still decodes: whatever the
+// callback read or declined to read, the next value has to start where it
+// should. The drawn count spans both the payload length and the buffer the
+// library hands the callback, since those are the two boundaries the
+// realignment arithmetic turns on.
+test "fuzz ext callback misreads its payload" {
+    try testing.fuzz(
+        {},
+        struct {
+            fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
+                _ = ctx;
+
+                var payload: [1024]u8 = undefined;
+                const len = smith.slice(&payload);
+                misread_take = smith.valueRangeAtMost(u32, 0, len + 64);
+
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
+                try packer.pack(MisreadExt{ .buf = payload[0..len] });
+                try packer.pack(@as(u32, 0xDEADBEEF));
+                packer.finish();
+
+                var r = std.Io.Reader.fixed(aw.written());
+                var u = Unpacker.init(testing.allocator, &r);
+                _ = u.unpack_as(MisreadExt) catch {};
+                try testing.expectEqual(@as(u32, 0xDEADBEEF), try u.unpack_as(u32));
             }
         }.fuzz,
         .{},
