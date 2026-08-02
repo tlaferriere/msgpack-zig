@@ -41,6 +41,13 @@ jobs:
       - uses: docker/setup-qemu-action@v3
       - uses: docker/setup-buildx-action@v3
 
+      # `--load` writes into the runner's image store under whatever tag it is
+      # given, so a fixed one would have every branch claiming the same name and
+      # smoke-testing whichever build landed last. Slashes are legal in a ref
+      # and not in a tag, so they fold to dashes.
+      - name: Derive a branch-scoped CI tag
+        run: echo "CI_TAG=ci-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
       # Build the native arch first and load it, so the image is exercised on
       # pull requests too. Nothing else proves the download URLs and the
       # signature check still hold. The multi-arch build below reuses these
@@ -52,14 +59,14 @@ jobs:
           target: tools
           platforms: linux/amd64
           load: true
-          tags: ${{ env.IMAGE }}:ci
+          tags: ${{ env.IMAGE }}:${{ env.CI_TAG }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
       - name: Smoke test the toolchain
         run: |
-          docker run --rm -v "$PWD:/workspace" "${IMAGE}:ci" \
-            bash -c 'zig version && zls --version && zig build test --release=safe --summary all'
+          docker run --rm -v "$PWD:/workspace" "${IMAGE}:${CI_TAG}" \
+            bash -c 'zig version && zls --version && zig build test --summary all'
 
       - name: Log in to GHCR
         if: github.event_name != 'pull_request'
