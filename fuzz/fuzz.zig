@@ -73,6 +73,22 @@ const MyExt = struct {
     };
 };
 
+/// Largest ext payload the targets below build. The rest of the ext sizing here
+/// is derived from it so the numbers cannot drift apart.
+const max_ext_payload = 1024;
+
+/// How far past the end of a payload those targets will ask a callback to read.
+///
+/// It has to clear `ext_reader_capacity`, because that buffer is the boundary
+/// the library's realignment arithmetic turns on: bytes inside it are already
+/// out of the underlying stream, bytes beyond it are not. An overshoot smaller
+/// than the buffer would never reach the case worth testing.
+const ext_overshoot = 2 * msgpack.ext_reader_capacity;
+
+/// An `ext_32` frame header: the marker, a four-byte length, then the type id.
+const ext_32_header_len = 6;
+const ext_32_marker = 0xc9;
+
 /// How many bytes `MisreadExt`'s callback will try to take. The fuzzer sets it
 /// before each round; the library has to leave the stream positioned after the
 /// payload whether that is too much, too little, or exactly right.
@@ -98,7 +114,10 @@ const MisreadExt = struct {
         ) !MisreadExt {
             _ = allocator;
             _ = len;
-            var sink: [8192]u8 = undefined;
+            // Sized to absorb the largest read any target asks for, so the
+            // drawn count reaches the library unclamped — clamping here would
+            // quietly stop the overshoot cases from ever being overshoots.
+            var sink: [max_ext_payload + ext_overshoot]u8 = undefined;
             const want = @min(misread_take, sink.len);
             // Over-reading is supposed to fail rather than reach the next value,
             // so failing here is a valid outcome, not a finding.
@@ -708,9 +727,9 @@ test "fuzz ext callback misreads its payload" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var payload: [1024]u8 = undefined;
+                var payload: [max_ext_payload]u8 = undefined;
                 const len = smith.slice(&payload);
-                misread_take = smith.valueRangeAtMost(u32, 0, len + 64);
+                misread_take = smith.valueRangeAtMost(u32, 0, len + ext_overshoot);
 
                 var aw: std.Io.Writer.Allocating = .init(testing.allocator);
                 defer aw.deinit();
@@ -744,18 +763,24 @@ test "fuzz adversarial ext frames" {
             fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
                 _ = ctx;
 
-                var payload: [512]u8 = undefined;
+                var payload: [max_ext_payload]u8 = undefined;
                 const avail = smith.slice(&payload);
-                // Deliberately unrelated to `avail`, and allowed past it.
-                const declared = smith.valueRangeAtMost(u32, 0, 600);
-                partial_take = smith.valueRangeAtMost(u32, 0, 600);
+                // Both drawn independently of `avail`, and allowed past it —
+                // a header promising more than the frame carries is the whole
+                // point of this target.
+                const over = max_ext_payload + ext_overshoot;
+                const declared = smith.valueRangeAtMost(u32, 0, over);
+                partial_take = smith.valueRangeAtMost(u32, 0, over);
 
-                // ext_32, so any drawn length is expressible in the header.
-                var frame: [6 + payload.len]u8 = undefined;
-                frame[0] = 0xc9;
+                // ext_32, so any drawn length is expressible in the header. The
+                // type id comes from the type itself rather than being written
+                // out again, so renumbering it cannot leave this behind.
+                const type_id: u8 = @bitCast(PartialExt.__msgpack__.repr.ext);
+                var frame: [ext_32_header_len + payload.len]u8 = undefined;
+                frame[0] = ext_32_marker;
                 std.mem.writeInt(u32, frame[1..5], declared, .big);
-                frame[5] = 0x75;
-                @memcpy(frame[6..][0..avail], payload[0..avail]);
+                frame[5] = type_id;
+                @memcpy(frame[ext_32_header_len..][0..avail], payload[0..avail]);
 
                 // A private allocator per iteration, because `testing.allocator`
                 // only reports leaks when the test tears down — which never
@@ -764,7 +789,7 @@ test "fuzz adversarial ext frames" {
                 var gpa: std.heap.DebugAllocator(.{}) = .init;
                 const alloc = gpa.allocator();
                 {
-                    var r = std.Io.Reader.fixed(frame[0 .. 6 + avail]);
+                    var r = std.Io.Reader.fixed(frame[0 .. ext_32_header_len + avail]);
                     var u = Unpacker.init(alloc, &r);
                     if (u.unpack_as(PartialExt)) |v| {
                         alloc.free(v.buf);
