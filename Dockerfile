@@ -33,7 +33,18 @@ ARG ZLS_VERSION=0.16.0
 
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
-RUN apt-get update \
+# apt keeps its downloads across builds in a cache mount rather than being
+# re-fetched every time. The base image ships `docker-clean`, which throws the
+# archives away the moment they are unpacked, so it has to go for the cache to
+# hold anything. Nothing deletes `/var/lib/apt/lists` afterwards either: it is
+# the mount, not a layer, so it never reaches the image.
+RUN rm -f /etc/apt/apt.conf.d/docker-clean \
+    && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
+        > /etc/apt/apt.conf.d/keep-cache
+
+RUN --mount=type=cache,target=/var/cache/apt,sharing=locked \
+    --mount=type=cache,target=/var/lib/apt,sharing=locked \
+    apt-get update \
     && apt-get install -y --no-install-recommends \
         ca-certificates \
         curl \
@@ -42,8 +53,7 @@ RUN apt-get update \
         less \
         minisign \
         ripgrep \
-        xz-utils \
-    && rm -rf /var/lib/apt/lists/*
+        xz-utils
 
 # Same script the cloud SessionStart hook runs, so both paths install Zig the
 # same way. build.zig.zon comes along only as the version source.
