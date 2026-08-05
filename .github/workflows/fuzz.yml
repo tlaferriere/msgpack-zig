@@ -5,14 +5,18 @@ on:
   workflow_dispatch:
     inputs:
       iterations:
-        description: 'Fuzz iterations per test (--fuzz=N)'
+        description: 'Total fuzz iterations, split evenly across every target'
         default: '288000'
 jobs:
   fuzz:
     runs-on: ubuntu-latest
-    # Runner rate measured ~20 iters/s, so 288k iterations is ~4h. The backstop
-    # absorbs rate variance and reds the job if the runner stalls, while staying
-    # under the 6h per-job cap.
+    # Runner rate measured ~20 iters/s, so 288k iterations is ~4h. The budget is
+    # split across the targets rather than raised, so the fuzzing time is
+    # unchanged; the rotation adds one build per target on top, since filtering
+    # changes the test binary and there are ~20 of them.
+    #
+    # The backstop absorbs rate variance and reds the job if the runner stalls,
+    # while staying under the 6h per-job cap.
     timeout-minutes: 320
     steps:
       - uses: actions/checkout@v4
@@ -41,21 +45,52 @@ jobs:
 
       - name: Run continuous fuzzing
         env:
+          # Total across every target, not per target — see the rotation below.
           ITERATIONS: ${{ github.event.inputs.iterations || '5000000' }}
-        # --fuzz=N runs N iterations per fuzz test then exits. A found crash is
-        # reported and its input saved to .zig-cache/f/crash, but the build's
-        # exit code stays 0 (zig 0.16 tallies step failures before the fuzz
-        # phase runs), so detect the crash artifact explicitly.
+        # `--fuzz=N` fuzzes ONE test per invocation. The fuzzer schedules a
+        # single target and spends the entire budget on it, so an unfiltered run
+        # leaves every other target at zero runs no matter how large N is — in
+        # practice everything went to `fuzz unpack scalars`. The targets are
+        # rotated explicitly instead, each taking a share of the budget.
+        #
+        # The list comes out of the source rather than being repeated here:
+        # every test in fuzz/fuzz.zig is a `testing.fuzz` target, so a new one
+        # joins the rotation by existing.
+        #
+        # A found crash is reported and its input saved to .zig-cache/f/crash,
+        # but the build's exit code stays 0 (zig 0.16 tallies step failures
+        # before the fuzz phase runs), so detect the artifact explicitly. That
+        # check has to happen after every target, because the next one would
+        # overwrite the file — so the loop stops at the first crash and leaves
+        # the input in place for the upload step.
         run: |
-          set +e
+          set -uo pipefail
           rm -f .zig-cache/f/crash
-          zig build test --release=safe --fuzz="$ITERATIONS"
-          ec=$?
-          if [ -f .zig-cache/f/crash ]; then
-            echo "::error::Fuzzer found a crash; reproduce with 'zig build test --release=safe --fuzz' using the saved input artifact"
+
+          mapfile -t targets < <(grep -oP '(?<=^test ")[^"]+' fuzz/fuzz.zig)
+          if [ "${#targets[@]}" -eq 0 ]; then
+            echo "::error::No fuzz targets found in fuzz/fuzz.zig"
             exit 1
           fi
-          exit "$ec"
+
+          per_target=$(( ITERATIONS / ${#targets[@]} ))
+          [ "$per_target" -lt 1 ] && per_target=1
+          echo "Rotating ${#targets[@]} targets at $per_target iterations each"
+
+          status=0
+          for t in "${targets[@]}"; do
+            echo "::group::$t"
+            zig build test --release=safe -Dfuzz-filter="$t" --fuzz="$per_target"
+            ec=$?
+            if [ -f .zig-cache/f/crash ]; then
+              echo "::error::Fuzzer found a crash in '$t'; reproduce with 'zig build test --release=safe -Dfuzz-filter=\"$t\" --fuzz' using the saved input artifact"
+              echo "::endgroup::"
+              exit 1
+            fi
+            if [ "$ec" -ne 0 ]; then status="$ec"; fi
+            echo "::endgroup::"
+          done
+          exit "$status"
 
       - name: Upload crash input
         if: failure()
