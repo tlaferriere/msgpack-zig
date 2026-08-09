@@ -512,7 +512,7 @@ pub const Unpacker = struct {
         // fits inside `max_message_bytes`. It is not held to `max_prealloc_bytes`
         // the way the library's own decoding is — that is the callback's call to
         // make, and `len` is given to it so it can make it.
-        try self.charge(metadata.len, 1);
+        try self.charge(1, metadata.len);
 
         // The callback gets a reader that ends where its payload does, so
         // reading too far fails on its own rather than eating the next value.
