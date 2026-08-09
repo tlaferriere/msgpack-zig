@@ -2,8 +2,8 @@
 //!
 //! Run with: `zig build test --release=safe --fuzz`
 //!
-//! When NOT in fuzz mode (`zig build test --release=safe`), these run as
-//! quick smoke tests with empty/corpus inputs.
+//! When NOT in fuzz mode (`zig build test`), these run as quick smoke tests
+//! with empty/corpus inputs, and any build mode will do.
 //!
 //! Fuzz targets:
 //!   1. Unpacker — feed arbitrary bytes, catch crashes. One target per family:
@@ -17,12 +17,14 @@
 //!
 //!     zig build test --release=safe -Dfuzz-filter="round-trip ext" --fuzz
 //!
-//! `--release=safe` is required, and the other modes fail for their own reasons.
-//! Debug does not compile: Zig 0.16's test runner hands `@errorReturnTrace()`'s
-//! `*builtin.StackTrace` to `std.debug.writeStackTrace`, which takes a
-//! `*const debug.StackTrace`, and that branch is only analyzed where error
-//! return traces exist. ReleaseSmall strips the debug info the fuzzer reads
-//! coverage from.
+//! In fuzz mode `--release=safe` is required, and the other modes fail for
+//! their own reasons. Debug does not compile — but only here, under `-ffuzz`:
+//! the failure is inside the test runner's `fuzz` entry point, which nothing
+//! references until a `testing.fuzz` target is built for fuzzing, which is why
+//! a plain `zig build test` in Debug is fine. That entry point hands
+//! `@errorReturnTrace()`'s `*builtin.StackTrace` to `std.debug.writeStackTrace`,
+//! which takes a `*const debug.StackTrace`. ReleaseSmall strips the debug info
+//! the fuzzer reads coverage from.
 //!
 //! ReleaseFast does build and run — do not use it. Safety checks are what most
 //! of these targets detect bugs *with*, and it turns them off. The timestamp
@@ -79,11 +81,12 @@ const max_ext_payload = 1024;
 
 /// How far past the end of a payload those targets will ask a callback to read.
 ///
-/// It has to clear `ext_reader_capacity`, because that buffer is the boundary
-/// the library's realignment arithmetic turns on: bytes inside it are already
-/// out of the underlying stream, bytes beyond it are not. An overshoot smaller
-/// than the buffer would never reach the case worth testing.
-const ext_overshoot = 2 * msgpack.ext_reader_capacity;
+/// The library realigns the stream from what the callback left unread, and the
+/// buffer it hands the callback holds up to a whole payload — bytes inside it
+/// are already out of the underlying stream, bytes beyond it are not. So the
+/// overshoot has to be able to clear a full payload's worth of buffering to
+/// reach the case worth testing.
+const ext_overshoot = max_ext_payload;
 
 /// An `ext_32` frame header: the marker, a four-byte length, then the type id.
 const ext_32_header_len = 6;

@@ -39,7 +39,7 @@ var message = msgpack.Unpacker.initWithOptions(allocator, &reader, .{
 
 ```sh
 # Run all tests (unit + integration + fuzz smoke tests):
-zig build test --release=safe
+zig build test
 
 # Run fuzz tests with the fuzzer (continuously mutates inputs to find crashes):
 zig build test --release=safe --fuzz
@@ -81,7 +81,12 @@ an empty input. With `--fuzz`, the build system rebuilds the test binary with
 `-ffuzz` instrumentation and the built-in libFuzzer-based fuzzer takes over,
 continuously mutating inputs to maximize code coverage.
 
-> **Note:** `--release=safe` is required because Debug mode causes a compilation error in the standard library.
+> **Note:** `--release=safe` belongs on the `--fuzz` runs only; the test suite
+> itself builds and passes in Debug. Fuzz mode is where the other modes break:
+> Debug fails to compile, because `-ffuzz` pulls in a branch of Zig 0.16's test
+> runner that does not build, and ReleaseSmall strips the debug info the fuzzer
+> reads coverage from. ReleaseFast does run, but turns off the safety checks
+> most of these targets detect bugs *with*.
 
 ## Contributing
 
@@ -104,7 +109,7 @@ docker run --rm -it \
     msgpack-zig-dev
 
 # inside the container:
-zig build test --release=safe
+zig build test
 zig build docs
 ```
 
