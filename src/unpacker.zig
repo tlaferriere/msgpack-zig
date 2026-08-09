@@ -17,19 +17,6 @@ pub const DeserializeError = error{
     MessageTooLong,
 };
 
-/// Buffer capacity of the reader an `unpack_ext` callback is given.
-///
-/// `std.Io.Reader`'s buffered reads — `take`, `takeArray`, `takeInt`, `peek` —
-/// assert that the reader was built with at least that many bytes of capacity,
-/// so this is the widest contiguous read a callback may make that way. Asking
-/// for more is an assertion failure inside `std`, not an error a callback can
-/// catch, which is why the number is public and pinned by a test.
-///
-/// Reads that do not go through the buffer — `readSliceAll`, `readAlloc`,
-/// `allocRemaining`, `discardAll` — are unaffected, and are what a payload
-/// larger than this should use.
-pub const ext_reader_capacity = 64;
-
 pub const Unpacker = struct {
     allocator: std.mem.Allocator,
     reader: *std.Io.Reader,
@@ -516,8 +503,28 @@ pub const Unpacker = struct {
 
         // The callback gets a reader that ends where its payload does, so
         // reading too far fails on its own rather than eating the next value.
-        var buf: [ext_reader_capacity]u8 = undefined;
-        var limited = self.reader.limited(.limited64(metadata.len), &buf);
+        //
+        // `std.Io.Reader`'s buffered reads — `take`, `takeArray`, `takeInt`,
+        // `peek` — assert against the capacity the reader was built with rather
+        // than returning an error, so that capacity is what decides which reads
+        // a callback may make. Sizing it from the payload, under the same
+        // prealloc ceiling every other declared length here answers to, makes
+        // that bound one the callback already holds: it may buffer-read up to
+        // its own `len`. Past the ceiling it has to stream, same as the
+        // library's own decoding does.
+        //
+        // The floor is not part of that contract. It only keeps a callback that
+        // reads a fixed-width integer without checking `len` first getting
+        // `EndOfStream` back, the way it would from any other short reader,
+        // instead of tripping the assert — a truncated frame is attacker input,
+        // and it should not be able to pick which of the two a sloppy callback
+        // gets.
+        const buf = try self.allocator.alloc(
+            u8,
+            @max(self.prealloc_count(u8, metadata.len), @sizeOf(u128)),
+        );
+        defer self.allocator.free(buf);
+        var limited = self.reader.limited(.limited64(metadata.len), buf);
         const value = callback(self.allocator, &limited.interface, metadata.len);
 
         // Whatever the callback did not read is still payload, and leaving it

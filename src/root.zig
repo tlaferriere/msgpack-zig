@@ -5,7 +5,6 @@ const Endian = std.builtin.Endian;
 pub const Bin = @import("packer.zig").Bin;
 pub const Packer = @import("packer.zig").Packer;
 pub const Unpacker = @import("unpacker.zig").Unpacker;
-pub const ext_reader_capacity = @import("unpacker.zig").ext_reader_capacity;
 
 // Reexports
 /// Msgpack-serializable timestamp extension type.
@@ -136,11 +135,12 @@ pub const Repr = union(enum) {
     ///   returned `T` keeps needs to come from the allocator.
     ///
     ///   That reader is buffered, and `std.Io.Reader`'s buffered reads assert
-    ///   rather than fail: `take`, `takeArray`, `takeInt` and `peek` are limited
-    ///   to `ext_reader_capacity` bytes in one call, and asking for more aborts
-    ///   instead of returning an error. A payload wider than that should be read
-    ///   with `readSliceAll`, `readAlloc` or `allocRemaining`, which stream and
-    ///   have no such limit.
+    ///   rather than fail: `take`, `takeArray`, `takeInt` and `peek` are good
+    ///   for any count up to the payload's own `len`, and asking for more than
+    ///   the payload holds aborts instead of returning an error. A payload
+    ///   longer than `Unpacker.Options.max_prealloc_bytes` has to be read with
+    ///   `readSliceAll`, `readAlloc` or `allocRemaining`, which stream and have
+    ///   no such limit.
     /// - Packing requires:
     ///    - `__msgpack__.pack_ext(T, *std.Io.Writer) !void`
     ///

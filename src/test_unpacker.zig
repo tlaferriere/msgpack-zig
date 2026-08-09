@@ -7,7 +7,6 @@ const Repr = @import("root.zig").Repr;
 const Timestamp = @import("root.zig").Timestamp;
 const Unpacker = @import("unpacker.zig").Unpacker;
 const Packer = @import("packer.zig").Packer;
-const ext_reader_capacity = @import("unpacker.zig").ext_reader_capacity;
 
 test "Deserialize false" {
     var r = std.Io.Reader.fixed("\xc2");
@@ -1211,15 +1210,18 @@ test "Bounded: growing a slice of owning elements leaks nothing on failure" {
     }.decode, .{});
 }
 
-// The reader an ext callback is given is built with a fixed buffer, and
+// The reader an ext callback is given is built with a buffer, and
 // `std.Io.Reader`'s buffered reads assert against that capacity rather than
 // returning an error — so a callback asking for a wider contiguous chunk aborts
-// the process instead of failing. The capacity is published for that reason,
-// and this pins it: a callback reading exactly `ext_reader_capacity` bytes in
-// one `takeArray` has to work.
+// the process instead of failing. The buffer is therefore sized from the
+// payload, and this pins the contract that follows: whatever `len` a callback
+// is handed, taking that many bytes in one call has to work.
 //
-// If this ever needs lowering, that is a breaking change for callbacks, not an
-// implementation detail.
+// The payload here is deliberately far wider than any buffer a fixed constant
+// would have been set to, so a capacity that stopped following `len` fails this
+// rather than passing by luck.
+const wide_ext_payload = 4096;
+
 const WideExt = struct {
     first: u8,
     last: u8,
@@ -1229,7 +1231,7 @@ const WideExt = struct {
 
         pub fn pack_ext(self: WideExt, writer: *std.Io.Writer) !void {
             _ = self;
-            try writer.writeAll("\xAB" ** (ext_reader_capacity - 1) ++ "\xCD");
+            try writer.writeAll("\xAB" ** (wide_ext_payload - 1) ++ "\xCD");
         }
 
         pub fn unpack_ext(
@@ -1238,14 +1240,13 @@ const WideExt = struct {
             len: usize,
         ) !WideExt {
             _ = allocator;
-            _ = len;
-            const chunk = try reader.takeArray(ext_reader_capacity);
+            const chunk = try reader.take(len);
             return WideExt{ .first = chunk[0], .last = chunk[chunk.len - 1] };
         }
     };
 };
 
-test "An ext callback can take the full published reader capacity at once" {
+test "An ext callback can take its whole payload in one buffered read" {
     var aw: std.Io.Writer.Allocating = .init(testing.allocator);
     defer aw.deinit();
     var packer = Packer.init(&aw.writer, testing.allocator);
@@ -1258,6 +1259,43 @@ test "An ext callback can take the full published reader capacity at once" {
 
     try testing.expectEqual(@as(u8, 0xAB), unpacked.first);
     try testing.expectEqual(@as(u8, 0xCD), unpacked.last);
+}
+
+// A callback is handed `len` precisely so it can check it, and one that reads a
+// fixed-width integer without looking is asking for more than a short payload
+// can give. It still has to get an error back rather than an abort: the
+// declared length is attacker input, and it must not get to pick which of the
+// two a careless callback receives. The floor on the reader's buffer is what
+// keeps that read failing the way any other short read would.
+const NaiveIntExt = struct {
+    value: u64,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x76 };
+
+        pub fn pack_ext(self: NaiveIntExt, writer: *std.Io.Writer) !void {
+            try writer.writeInt(u64, self.value, .big);
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !NaiveIntExt {
+            _ = allocator;
+            // Deliberately not checked — that is what this pins.
+            _ = len;
+            return NaiveIntExt{ .value = try reader.takeInt(u64, .big) };
+        }
+    };
+};
+
+test "An ext callback reading past a short payload fails instead of aborting" {
+    // fixext 1 (0xd4), type id 0x76, one payload byte — an eighth of what the
+    // callback is about to ask for in a single buffered read.
+    var r = std.Io.Reader.fixed("\xd4\x76\xff");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(error.EndOfStream, message.unpack_as(NaiveIntExt));
 }
 
 // A truncated ext value: the header declares more payload than the stream
