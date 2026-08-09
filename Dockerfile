@@ -34,10 +34,17 @@ ARG ZLS_VERSION=0.16.0
 SHELL ["/bin/bash", "-o", "pipefail", "-c"]
 
 # apt keeps its downloads across builds in a cache mount rather than being
-# re-fetched every time. The base image ships `docker-clean`, which throws the
-# archives away the moment they are unpacked, so it has to go for the cache to
-# hold anything. Nothing deletes `/var/lib/apt/lists` afterwards either: it is
-# the mount, not a layer, so it never reaches the image.
+# re-fetched every time. This pair of steps is the recipe from Docker's own
+# cache-mount guide, verbatim:
+# https://docs.docker.com/build/cache/optimize/#use-cache-mounts
+#
+# It reads oddly out of context, so: the Debian images ship
+# /etc/apt/apt.conf.d/docker-clean, which deletes each .deb the moment it is
+# unpacked. That exists because the archives would otherwise be dead weight in
+# the layer — but with a cache mount they are the whole point, so the file has
+# to go and apt has to be told to keep what it downloads. Nothing deletes
+# /var/lib/apt/lists afterwards either: it is the mount, not a layer, so it
+# never reaches the image.
 RUN rm -f /etc/apt/apt.conf.d/docker-clean \
     && echo 'Binary::apt::APT::Keep-Downloaded-Packages "true";' \
         > /etc/apt/apt.conf.d/keep-cache
@@ -63,14 +70,17 @@ RUN ZIG_VERSION="${ZIG_VERSION}" /opt/msgpack-zig/scripts/install-zig.sh
 
 # ZLS. Upstream publishes no signature, and the archive layout has moved between
 # releases, so locate the binary rather than assuming a path.
-RUN set -euo pipefail; \
+#
+# /tmp is a tmpfs mount for this step only, so the archive and the unpacked tree
+# never reach a layer and there is nothing to clean up afterwards.
+RUN --mount=type=tmpfs,target=/tmp \
+    set -euo pipefail; \
     arch="$(uname -m)"; \
     curl -fsSL -o /tmp/zls.tar.xz \
         "https://github.com/zigtools/zls/releases/download/${ZLS_VERSION}/zls-${arch}-linux.tar.xz"; \
     mkdir -p /tmp/zls; \
     tar -xJf /tmp/zls.tar.xz -C /tmp/zls; \
     install -m 0755 "$(find /tmp/zls -type f -name zls | head -n 1)" /usr/local/bin/zls; \
-    rm -rf /tmp/zls /tmp/zls.tar.xz; \
     zls --version
 
 # The worktree is mounted from the host, so its owner rarely matches any user
