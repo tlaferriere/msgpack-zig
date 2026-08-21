@@ -494,31 +494,15 @@ pub const Unpacker = struct {
     fn unpack_ext(self: *Unpacker, comptime As: type, comptime type_id: i8, comptime callback: anytype) !As {
         const metadata = try self.ext_decode();
         if (metadata.type_id != type_id) return DeserializeError.WrongExtType;
-        // Charging before the callback runs is what bounds it: whatever the
-        // callback chooses to allocate, it is working from a length that already
-        // fits inside `max_message_bytes`. It is not held to `max_prealloc_bytes`
-        // the way the library's own decoding is — that is the callback's call to
-        // make, and `len` is given to it so it can make it.
+        // Before the callback runs, so it works from a length already known to
+        // fit the budget.
         try self.charge(1, metadata.len);
 
-        // The callback gets a reader that ends where its payload does, so
-        // reading too far fails on its own rather than eating the next value.
-        //
-        // `std.Io.Reader`'s buffered reads — `take`, `takeArray`, `takeInt`,
-        // `peek` — assert against the capacity the reader was built with rather
-        // than returning an error, so that capacity is what decides which reads
-        // a callback may make. Sizing it from the payload, under the same
-        // prealloc ceiling every other declared length here answers to, makes
-        // that bound one the callback already holds: it may buffer-read up to
-        // its own `len`. Past the ceiling it has to stream, same as the
-        // library's own decoding does.
-        //
-        // The floor is not part of that contract. It only keeps a callback that
-        // reads a fixed-width integer without checking `len` first getting
-        // `EndOfStream` back, the way it would from any other short reader,
-        // instead of tripping the assert — a truncated frame is attacker input,
-        // and it should not be able to pick which of the two a sloppy callback
-        // gets.
+        // A reader that ends where the payload does, so over-reading fails
+        // instead of eating the next value. Buffered reads assert against
+        // capacity, so sizing it from the payload lets a callback take up to
+        // its own `len`; the floor keeps a payload too short for the integer a
+        // callback asked for returning `EndOfStream` rather than asserting.
         const buf = try self.allocator.alloc(
             u8,
             @max(self.prealloc_count(u8, metadata.len), @sizeOf(u128)),
@@ -527,25 +511,16 @@ pub const Unpacker = struct {
         var limited = self.reader.limited(.limited64(metadata.len), buf);
         const value = callback(self.allocator, &limited.interface, metadata.len);
 
-        // Whatever the callback did not read is still payload, and leaving it
-        // in the stream would hand it to the next value. `remaining` counts only
-        // the bytes never pulled from the underlying reader — anything buffered
-        // above is already consumed from it — so this realigns exactly.
-        //
-        // A saturated `Limit` reads back as `.unlimited`, which can only happen
-        // when `len` itself saturated, and `remaining` never exceeds `len`.
+        // What the callback left behind is still payload, and the next value
+        // would otherwise read it. `remaining` excludes anything buffered above,
+        // which is already out of the underlying reader, so this realigns
+        // exactly. It reads back `.unlimited` only if `len` itself saturated.
         const unread = limited.remaining.toInt() orelse metadata.len;
 
-        // This step must not fail. By now the callback has returned a value, and
-        // the library has no way to release one — `free_unpacked` stops at
-        // structs precisely because it cannot know what an ext type owns. Any
-        // error raised here would strand whatever that value allocated, which a
-        // frame declaring more payload than it carries could then be used to
-        // leak on demand.
-        //
-        // So it skips what is actually there and does not mind getting less.
-        // A frame that came up short is still a broken stream: the reader ends
-        // up at the end of what it had, and the next read is what reports it.
+        // Must not fail: the callback has already returned a value and the
+        // library cannot release one, so an error here would strand whatever it
+        // allocated — a leak a short frame could trigger on demand. A frame that
+        // came up short is still broken, and the next read is what reports it.
         _ = self.reader.discardShort(unread) catch {};
 
         return value;
