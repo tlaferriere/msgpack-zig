@@ -75,19 +75,6 @@ const MyExt = struct {
     };
 };
 
-/// Largest ext payload the targets below build. The rest of the ext sizing here
-/// is derived from it so the numbers cannot drift apart.
-const max_ext_payload = 1024;
-
-/// How far past the end of a payload those targets will ask a callback to read.
-///
-/// The library realigns the stream from what the callback left unread, and the
-/// buffer it hands the callback holds up to a whole payload — bytes inside it
-/// are already out of the underlying stream, bytes beyond it are not. So the
-/// overshoot has to be able to clear a full payload's worth of buffering to
-/// reach the case worth testing.
-const ext_overshoot = max_ext_payload;
-
 /// An `ext_32` frame header: the marker, a four-byte length, then the type id.
 const ext_32_header_len = 6;
 const ext_32_marker = 0xc9;
@@ -115,16 +102,12 @@ const MisreadExt = struct {
             reader: *std.Io.Reader,
             len: usize,
         ) !MisreadExt {
-            _ = allocator;
             _ = len;
-            // Sized to absorb the largest read any target asks for, so the
-            // drawn count reaches the library unclamped — clamping here would
-            // quietly stop the overshoot cases from ever being overshoots.
-            var sink: [max_ext_payload + ext_overshoot]u8 = undefined;
-            const want = @min(misread_take, sink.len);
             // Over-reading is supposed to fail rather than reach the next value,
             // so failing here is a valid outcome, not a finding.
-            _ = reader.readSliceShort(sink[0..want]) catch {};
+            if (reader.readAlloc(allocator, misread_take)) |bytes| {
+                allocator.free(bytes);
+            } else |_| {}
             return MisreadExt{ .buf = &.{} };
         }
     };
@@ -716,13 +699,16 @@ test "fuzz round-trip ext" {
     );
 }
 
+/// Largest ext payload the two targets below build, and the size of the buffer
+/// they build it in. Both draw reads of up to twice this, so asking a callback
+/// for more than its payload holds is always reachable.
+const max_ext_payload = 1024;
+
 // Keeping the stream aligned across an ext value is the library's job, not the
 // callback's. Draw a payload and an unrelated number of bytes for the callback
 // to take, then check the value *after* the ext still decodes: whatever the
 // callback read or declined to read, the next value has to start where it
-// should. The drawn count spans both the payload length and the buffer the
-// library hands the callback, since those are the two boundaries the
-// realignment arithmetic turns on.
+// should.
 test "fuzz ext callback misreads its payload" {
     try testing.fuzz(
         {},
@@ -732,7 +718,7 @@ test "fuzz ext callback misreads its payload" {
 
                 var payload: [max_ext_payload]u8 = undefined;
                 const len = smith.slice(&payload);
-                misread_take = smith.valueRangeAtMost(u32, 0, len + ext_overshoot);
+                misread_take = smith.valueRangeAtMost(u32, 0, 2 * max_ext_payload);
 
                 var aw: std.Io.Writer.Allocating = .init(testing.allocator);
                 defer aw.deinit();
@@ -771,7 +757,7 @@ test "fuzz adversarial ext frames" {
                 // Both drawn independently of `avail`, and allowed past it —
                 // a header promising more than the frame carries is the whole
                 // point of this target.
-                const over = max_ext_payload + ext_overshoot;
+                const over = 2 * max_ext_payload;
                 const declared = smith.valueRangeAtMost(u32, 0, over);
                 partial_take = smith.valueRangeAtMost(u32, 0, over);
 
