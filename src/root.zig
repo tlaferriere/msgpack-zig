@@ -22,6 +22,11 @@ pub const Timestamp = struct {
 
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = -1 };
+
+        /// Smallest of the spec's three timestamp layouts that fits the value.
+        /// Both layouts that carry nanoseconds put them ahead of the seconds:
+        /// timestamp 64 as the top 30 bits of one big-endian u64, timestamp 96
+        /// as a leading u32.
         pub fn pack_ext(self: Timestamp, writer: *std.Io.Writer) !void {
             if (self.nanoseconds == 0 and
                 self.seconds >= 0 and
