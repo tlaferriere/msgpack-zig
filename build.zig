@@ -65,8 +65,17 @@ pub fn build(b: *std.Build) void {
     });
     fuzz_test_mod.addImport("msgpack", mod);
 
+    // `--fuzz` schedules one test at a time, so a campaign that wants to reach
+    // every target has to narrow to them one by one.
+    const fuzz_filter = b.option(
+        []const u8,
+        "fuzz-filter",
+        "Only build fuzz tests whose name contains this substring",
+    );
+
     const fuzz_tests = b.addTest(.{
         .root_module = fuzz_test_mod,
+        .filters = if (fuzz_filter) |f| &.{f} else &.{},
     });
 
     const run_fuzz_tests = b.addRunArtifact(fuzz_tests);

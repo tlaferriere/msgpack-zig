@@ -22,22 +22,17 @@ pub const Timestamp = struct {
 
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = -1 };
-        pub fn pack_ext(self: Timestamp, alloc: std.mem.Allocator) ![]const u8 {
+
+        /// Smallest of the spec's three timestamp layouts that fits the value.
+        /// Both layouts that carry nanoseconds put them ahead of the seconds:
+        /// timestamp 64 as the top 30 bits of one big-endian u64, timestamp 96
+        /// as a leading u32.
+        pub fn pack_ext(self: Timestamp, writer: *std.Io.Writer) !void {
             if (self.nanoseconds == 0 and
                 self.seconds >= 0 and
                 self.seconds <= std.math.maxInt(u32))
             {
-                const buf = try alloc.alloc(u8, 4);
-                std.mem.writeInt(
-                    u32,
-                    std.mem.bytesAsValue(
-                        [4]u8,
-                        buf,
-                    ),
-                    @intCast(self.seconds),
-                    Endian.big,
-                );
-                return buf;
+                return writer.writeInt(u32, @intCast(self.seconds), Endian.big);
             }
 
             if (self.nanoseconds > 999_999_999) {
@@ -47,77 +42,28 @@ pub const Timestamp = struct {
             if (self.seconds >= 0 and self.seconds <= std.math.maxInt(u34)) {
                 const combined: u64 = (@as(u64, self.nanoseconds) << 34) |
                     @as(u64, @intCast(self.seconds));
-                const buf = try alloc.alloc(u8, 8);
-                std.mem.writeInt(
-                    u64,
-                    std.mem.bytesAsValue(
-                        [8]u8,
-                        buf,
-                    ),
-                    @intCast(combined),
-                    Endian.big,
-                );
-                return buf;
+                return writer.writeInt(u64, combined, Endian.big);
             }
 
-            const buf = try alloc.alloc(u8, 12);
-            std.mem.writeInt(
-                u32,
-                std.mem.bytesAsValue(
-                    [4]u8,
-                    buf[0..4],
-                ),
-                self.nanoseconds,
-                Endian.big,
-            );
-            std.mem.writeInt(
-                i64,
-                std.mem.bytesAsValue(
-                    [8]u8,
-                    buf[4..12],
-                ),
-                self.seconds,
-                Endian.big,
-            );
-            return buf;
+            try writer.writeInt(u32, self.nanoseconds, Endian.big);
+            try writer.writeInt(i64, self.seconds, Endian.big);
         }
 
-        pub fn packed_size(self: Timestamp) !usize {
-            if (self.nanoseconds == 0 and
-                self.seconds >= 0 and
-                self.seconds <= std.math.maxInt(u32))
-            {
-                return 4;
-            }
-
-            if (self.nanoseconds > 999_999_999) {
-                return Error.TooManyNanoseconds;
-            }
-
-            if (self.seconds >= 0 and self.seconds <= std.math.maxInt(u34)) {
-                return 8;
-            }
-
-            return 12;
-        }
-
-        pub fn unpack_ext(allocator: std.mem.Allocator, buffer: []const u8) !Timestamp {
-            defer allocator.free(buffer);
-            return switch (buffer.len) {
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !Timestamp {
+            // A timestamp is three fixed layouts told apart by their length, so
+            // it keeps nothing past this call and never allocates.
+            _ = allocator;
+            return switch (len) {
                 4 => Timestamp{
-                    .seconds = @intCast(std.mem.readVarInt(
-                        u32,
-                        buffer,
-                        Endian.big,
-                    )),
+                    .seconds = @intCast(try reader.takeInt(u32, Endian.big)),
                     .nanoseconds = 0,
                 },
                 8 => blk: {
-                    const data = std.mem.readVarInt(
-                        u64,
-                        buffer,
-                        Endian.big,
-                    );
+                    const data = try reader.takeInt(u64, Endian.big);
                     const nanos: u64 = data >> 34;
                     if (nanos > 999_999_999) {
                         return Error.TooManyNanoseconds;
@@ -129,20 +75,12 @@ pub const Timestamp = struct {
                     break :blk timestamp;
                 },
                 12 => blk: {
-                    const nanos = std.mem.readVarInt(
-                        u32,
-                        buffer[0..4],
-                        Endian.big,
-                    );
+                    const nanos = try reader.takeInt(u32, Endian.big);
                     if (nanos > 999_999_999) {
                         return Error.TooManyNanoseconds;
                     }
                     const timestamp = Timestamp{
-                        .seconds = std.mem.readVarInt(
-                            i64,
-                            buffer[4..],
-                            Endian.big,
-                        ),
+                        .seconds = try reader.takeInt(i64, Endian.big),
                         .nanoseconds = nanos,
                     };
                     break :blk timestamp;
@@ -193,9 +131,26 @@ pub const Repr = union(enum) {
     /// Negative values are reserved for future use.
     ///
     /// - Unpacking requires:
-    ///    - `__msgpack__.unpack_ext(std.mem.Allocator, []u8) T`
+    ///    - `__msgpack__.unpack_ext(std.mem.Allocator, *std.Io.Reader, usize) !T`
+    ///
+    ///   The reader yields exactly the payload and nothing beyond it, and the
+    ///   length is given so a type told apart by its size does not have to read
+    ///   the payload to find out how long it is. Reading less than the whole
+    ///   payload is fine — the remainder is discarded either way. Only what the
+    ///   returned `T` keeps needs to come from the allocator.
+    ///
+    ///   That reader is buffered, and `std.Io.Reader`'s buffered reads assert
+    ///   rather than fail: `take`, `takeArray`, `takeInt` and `peek` are good
+    ///   for any count up to the payload's own `len`, and asking for more than
+    ///   the payload holds aborts instead of returning an error. A payload
+    ///   longer than `Unpacker.Options.max_prealloc_bytes` has to be read with
+    ///   `readSliceAll`, `readAlloc` or `allocRemaining`, which stream and have
+    ///   no such limit.
     /// - Packing requires:
-    ///    - `__msgpack__.pack_ext(std.mem.Allocator, T) []u8`
+    ///    - `__msgpack__.pack_ext(T, *std.Io.Writer) !void`
+    ///
+    ///   Whatever is written becomes the payload, and the header is derived from
+    ///   it, so there is no size to declare and nothing to keep in sync.
     ext: i8,
     /// # Map
     ///

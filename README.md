@@ -39,7 +39,7 @@ var message = msgpack.Unpacker.initWithOptions(allocator, &reader, .{
 
 ```sh
 # Run all tests (unit + integration + fuzz smoke tests):
-zig build test --release=safe
+zig build test
 
 # Run fuzz tests with the fuzzer (continuously mutates inputs to find crashes):
 zig build test --release=safe --fuzz
@@ -81,8 +81,80 @@ an empty input. With `--fuzz`, the build system rebuilds the test binary with
 `-ffuzz` instrumentation and the built-in libFuzzer-based fuzzer takes over,
 continuously mutating inputs to maximize code coverage.
 
-> **Note:** `--release=safe` is required because Debug mode causes a compilation error in the standard library.
+> **Note:** `--release=safe` belongs on the `--fuzz` runs only; the test suite
+> itself builds and passes in Debug. Fuzz mode is where the other modes break:
+> Debug fails to compile, because `-ffuzz` pulls in a branch of Zig 0.16's test
+> runner that does not build, and ReleaseSmall strips the debug info the fuzzer
+> reads coverage from. ReleaseFast does run, but turns off the safety checks
+> most of these targets detect bugs *with*.
 
 ## Contributing
 
-To make it easy to have the right
+To make it easy to have the right toolchain on hand, the repo ships a
+`Dockerfile` that installs Zig 0.16 (the version `build.zig.zon` requires) and a
+matching ZLS. Build it once, passing your own uid/gid so files written into the
+mounted worktree stay yours:
+
+```sh
+docker build -t msgpack-zig-dev \
+    --build-arg UID="$(id -u)" --build-arg GID="$(id -g)" .
+```
+
+Then work inside it with the repo bind-mounted:
+
+```sh
+docker run --rm -it \
+    -v "$PWD:/workspace" \
+    -v msgpack-zig-cache:/home/dev/.cache \
+    msgpack-zig-dev
+
+# inside the container:
+zig build test
+zig build docs
+```
+
+The image carries no source of its own — `/workspace` is your checkout, so edits
+made on the host are what get compiled. The named volume holds Zig's global
+cache, which is what keeps rebuilds incremental between runs; the project's own
+`.zig-cache` (including the fuzz corpus) lives in the worktree as usual.
+
+Other Zig versions are one flag away, should you need to check behaviour against
+one: `--build-arg ZIG_VERSION=0.16.1 --build-arg ZLS_VERSION=0.16.1`. Left unset,
+`ZIG_VERSION` follows `.minimum_zig_version` in `build.zig.zon`, so the toolchain
+tracks the package rather than drifting from it.
+
+### Where Zig comes from
+
+`scripts/install-zig.sh` downloads Zig from a [community
+mirror](https://ziglang.org/download/community-mirrors/), picked at random from
+upstream's list, because ziglang.org's bandwidth is donated and upstream asks
+that automation stay off it. ziglang.org is used only if every mirror fails.
+
+Mirrors are run by volunteers, so nothing is trusted on arrival: each download
+is checked against Zig's minisign public key, and a mirror that serves anything
+that does not verify is skipped rather than used. The check is required — if
+`minisign` is missing the script installs it, and refuses to continue if it
+cannot. A few knobs, none of them normally needed:
+
+| Variable | Effect |
+| --- | --- |
+| `ZIG_MIRRORS` | Mirrors to use, whitespace separated. Skips discovery, which is what a network that only allows one host needs. |
+| `ZIG_MIRROR_LIST` | Where to discover mirrors, if not upstream's list. |
+| `ZIG_VERSION` | What to install, if not `.minimum_zig_version`. |
+| `ZIG_PREFIX`, `ZIG_BINDIR` | Where it lands. Defaults to `/opt/zig` and `/usr/local/bin`. |
+
+### Pulling the image instead of building it
+
+The `Dev Image` workflow publishes the same toolchain to GHCR on every push to
+`main`, so it can be pulled rather than rebuilt:
+
+```sh
+docker pull ghcr.io/tlaferriere/msgpack-zig-dev:latest
+docker run --rm -it -v "$PWD:/workspace" ghcr.io/tlaferriere/msgpack-zig-dev:latest
+```
+
+Images are tagged `latest` and `sha-<commit>`, and built for `linux/amd64` and
+`linux/arm64`. The published image is the `tools` stage: identical tools, but
+running as root with no baked-in uid, which is what suits a base image or a
+throwaway container. The `dev` stage above is the one to build locally, since
+only you know which uid should own your files.

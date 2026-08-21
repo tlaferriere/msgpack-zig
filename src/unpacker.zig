@@ -494,12 +494,36 @@ pub const Unpacker = struct {
     fn unpack_ext(self: *Unpacker, comptime As: type, comptime type_id: i8, comptime callback: anytype) !As {
         const metadata = try self.ext_decode();
         if (metadata.type_id != type_id) return DeserializeError.WrongExtType;
-        try self.charge(metadata.len, 1);
-        // `read_bytes` frees on its own error path, so `slice` only reaches
-        // `callback` complete — and from there ownership is the callback's, which
-        // frees it if it fails.
-        const slice = try self.read_bytes(metadata.len);
-        return callback(self.allocator, slice);
+        // Before the callback runs, so it works from a length already known to
+        // fit the budget.
+        try self.charge(1, metadata.len);
+
+        // A reader that ends where the payload does, so over-reading fails
+        // instead of eating the next value. Buffered reads assert against
+        // capacity, so sizing it from the payload lets a callback take up to
+        // its own `len`; the floor keeps a payload too short for the integer a
+        // callback asked for returning `EndOfStream` rather than asserting.
+        const buf = try self.allocator.alloc(
+            u8,
+            @max(self.prealloc_count(u8, metadata.len), @sizeOf(u128)),
+        );
+        defer self.allocator.free(buf);
+        var limited = self.reader.limited(.limited64(metadata.len), buf);
+        const value = callback(self.allocator, &limited.interface, metadata.len);
+
+        // What the callback left behind is still payload, and the next value
+        // would otherwise read it. `remaining` excludes anything buffered above,
+        // which is already out of the underlying reader, so this realigns
+        // exactly. It reads back `.unlimited` only if `len` itself saturated.
+        const unread = limited.remaining.toInt() orelse metadata.len;
+
+        // Must not fail: the callback has already returned a value and the
+        // library cannot release one, so an error here would strand whatever it
+        // allocated — a leak a short frame could trigger on demand. A frame that
+        // came up short is still broken, and the next read is what reports it.
+        _ = self.reader.discardShort(unread) catch {};
+
+        return value;
     }
 
     const ExtMetadata = struct { type_id: i8, len: usize };

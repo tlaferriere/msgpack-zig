@@ -6,6 +6,7 @@ const DeserializeError = @import("unpacker.zig").DeserializeError;
 const Repr = @import("root.zig").Repr;
 const Timestamp = @import("root.zig").Timestamp;
 const Unpacker = @import("unpacker.zig").Unpacker;
+const Packer = @import("packer.zig").Packer;
 
 test "Deserialize false" {
     var r = std.Io.Reader.fixed("\xc2");
@@ -518,7 +519,12 @@ const MyType = struct {
 
     pub const __msgpack__ = struct {
         pub const repr = Repr{ .ext = 0x71 };
-        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyType {
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MyType {
+            const data = try reader.readAlloc(allocator, len);
             errdefer allocator.free(data);
             for (data) |b| {
                 if (b == 0xFF) {
@@ -660,6 +666,90 @@ test "Deserialize Ext_32 right type" {
         val,
         unpacked,
     );
+}
+
+// An ext callback is handed the reader, and the payload it was called for is
+// only a stretch of that reader. Nothing about the reader says where the
+// payload stops, so these two types read the wrong amount on purpose.
+
+/// Reads one byte more than its payload.
+const GreedyType = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x73 };
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !GreedyType {
+            return GreedyType{ .buf = try reader.readAlloc(allocator, len + 1) };
+        }
+    };
+};
+
+/// Reads only the first byte of its payload, however long it is.
+const LazyType = struct {
+    first: u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x74 };
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !LazyType {
+            _ = allocator;
+            _ = len;
+            return LazyType{ .first = try reader.takeByte() };
+        }
+    };
+};
+
+test "Deserialize ext callback reading past its payload" {
+    // FixExt_2 of "\xAA\xBB", then 0x2A as the next value.
+    var r = std.Io.Reader.fixed("\xd5\x73\xAA\xBB\x2A");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    // The third byte the callback asks for belongs to the next value, not to
+    // this payload, so it must not be there to read.
+    try testing.expectError(
+        error.EndOfStream,
+        message.unpack_as(GreedyType),
+    );
+
+    try testing.expectEqual(@as(u8, 0x2A), try message.unpack_as(u8));
+}
+
+test "Deserialize ext callback reading less than its payload" {
+    // FixExt_4 of "\xAA\xBB\xCC\xDD", then 0x2A as the next value.
+    var r = std.Io.Reader.fixed("\xd6\x74\xAA\xBB\xCC\xDD\x2A");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    const unpacked = try message.unpack_as(LazyType);
+    try testing.expectEqual(@as(u8, 0xAA), unpacked.first);
+
+    // The three bytes the callback left behind are still payload. Whoever
+    // reads next must not be the one to find them.
+    try testing.expectEqual(@as(u8, 0x2A), try message.unpack_as(u8));
+}
+
+// The test above leaves a payload short enough that it fits whatever buffer the
+// callback's reader is given, so the unread tail is pulled out of the stream as
+// a side effect of buffering it. That hides the case this one is for: a payload
+// longer than that buffer leaves bytes that were never fetched at all, and only
+// discarding them explicitly puts the stream back where it belongs.
+test "Deserialize ext callback reading less than a payload past the buffer" {
+    const len = 64;
+    const content = "\xAA" ** len;
+    // Ext_8 of 64 bytes, then 0x2A as the next value.
+    var r = std.Io.Reader.fixed("\xc7\x40\x74" ++ content ++ "\x2A");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    const unpacked = try message.unpack_as(LazyType);
+    try testing.expectEqual(@as(u8, 0xAA), unpacked.first);
+
+    try testing.expectEqual(@as(u8, 0x2A), try message.unpack_as(u8));
 }
 
 test "Deserialize Timestamp 32" {
@@ -1118,4 +1208,170 @@ test "Bounded: growing a slice of owning elements leaks nothing on failure" {
             try testing.expectEqual(@as(usize, 3), unpacked.len);
         }
     }.decode, .{});
+}
+
+// The reader an ext callback is given is built with a buffer, and
+// `std.Io.Reader`'s buffered reads assert against that capacity rather than
+// returning an error — so a callback asking for a wider contiguous chunk aborts
+// the process instead of failing. The buffer is therefore sized from the
+// payload, and this pins the contract that follows: whatever `len` a callback
+// is handed, taking that many bytes in one call has to work.
+//
+// The payload here is deliberately far wider than any buffer a fixed constant
+// would have been set to, so a capacity that stopped following `len` fails this
+// rather than passing by luck.
+const wide_ext_payload = 4096;
+
+const WideExt = struct {
+    first: u8,
+    last: u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x73 };
+
+        pub fn pack_ext(self: WideExt, writer: *std.Io.Writer) !void {
+            _ = self;
+            try writer.writeAll("\xAB" ** (wide_ext_payload - 1) ++ "\xCD");
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !WideExt {
+            _ = allocator;
+            const chunk = try reader.take(len);
+            return WideExt{ .first = chunk[0], .last = chunk[chunk.len - 1] };
+        }
+    };
+};
+
+test "An ext callback can take its whole payload in one buffered read" {
+    var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+    defer aw.deinit();
+    var packer = Packer.init(&aw.writer, testing.allocator);
+    try packer.pack(WideExt{ .first = 0, .last = 0 });
+    packer.finish();
+
+    var r = std.Io.Reader.fixed(aw.written());
+    var message = Unpacker.init(testing.allocator, &r);
+    const unpacked = try message.unpack_as(WideExt);
+
+    try testing.expectEqual(@as(u8, 0xAB), unpacked.first);
+    try testing.expectEqual(@as(u8, 0xCD), unpacked.last);
+}
+
+// A callback is handed `len` precisely so it can check it, and one that reads a
+// fixed-width integer without looking is asking for more than a short payload
+// can give. It still has to get an error back rather than an abort: the
+// declared length is attacker input, and it must not get to pick which of the
+// two a careless callback receives. The floor on the reader's buffer is what
+// keeps that read failing the way any other short read would.
+const NaiveIntExt = struct {
+    value: u64,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x76 };
+
+        pub fn pack_ext(self: NaiveIntExt, writer: *std.Io.Writer) !void {
+            try writer.writeInt(u64, self.value, .big);
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !NaiveIntExt {
+            _ = allocator;
+            // Deliberately not checked — that is what this pins.
+            _ = len;
+            return NaiveIntExt{ .value = try reader.takeInt(u64, .big) };
+        }
+    };
+};
+
+test "An ext callback reading past a short payload fails instead of aborting" {
+    // fixext 1 (0xd4), type id 0x76, one payload byte — an eighth of what the
+    // callback is about to ask for in a single buffered read.
+    var r = std.Io.Reader.fixed("\xd4\x76\xff");
+    var message = Unpacker.init(testing.allocator, &r);
+    try testing.expectError(error.EndOfStream, message.unpack_as(NaiveIntExt));
+}
+
+// A truncated ext value: the header declares more payload than the stream
+// actually holds. The callback reads only part of it and succeeds, allocating
+// as it goes; the library then tries to skip the rest and runs out of stream.
+//
+// The decode fails either way. The question is what happens to what the
+// callback already allocated on its way to succeeding.
+const TruncExt = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr{ .ext = 0x74 };
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !TruncExt {
+            _ = len;
+            // Deliberately less than the declared length, and little enough to
+            // still be there in a truncated stream.
+            return TruncExt{ .buf = try reader.readAlloc(allocator, 2) };
+        }
+    };
+};
+
+test "Deserialize a truncated ext strands nothing the callback allocated" {
+    // ext_8, declared length 10, type 0x74 — then only four payload bytes.
+    var r = std.Io.Reader.fixed("\xc7\x0A\x74" ++ "\x01\x02\x03\x04");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    // The callback got the two bytes it asked for, so it succeeds and its value
+    // comes back owning them. Skipping the six bytes the header promised but the
+    // stream never had cannot fail the decode here: there would be no way to
+    // release this value if it did, and `testing.allocator` is what says so.
+    const unpacked = try message.unpack_as(TruncExt);
+    testing.allocator.free(unpacked.buf);
+
+    // The frame was still short, and the reader is left at the end of what it
+    // actually had — so the next read is where that surfaces.
+    try testing.expectError(error.EndOfStream, message.unpack_as(u8));
+}
+
+// The struct-shaped decode is the closest neighbour to the map one, and it
+// resolves a repeated key differently: the field leaves `fields_to_fill` once
+// filled, so seeing it again is `WrongFields` rather than an overwrite. That
+// means there is no displaced value to lose — but it does have to unwind the
+// fields it already filled, and free the key that failed.
+const OwningStruct = struct {
+    a: []const u8,
+    b: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = Repr.map;
+    };
+};
+
+test "A repeated struct field unwinds without stranding anything" {
+    // FixMap of 2: "a" => "xx", "a" => "yy". The second "a" is the failure.
+    var r = std.Io.Reader.fixed("\x82" ++ "\xa1a" ++ "\xa2xx" ++ "\xa1a" ++ "\xa2yy");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    try testing.expectError(
+        DeserializeError.WrongFields,
+        message.unpack_as(OwningStruct),
+    );
+}
+
+test "An unknown struct field unwinds without stranding anything" {
+    // FixMap of 2: "a" => "xx", then a key the struct does not have.
+    var r = std.Io.Reader.fixed("\x82" ++ "\xa1a" ++ "\xa2xx" ++ "\xa1z" ++ "\xa2yy");
+    var message = Unpacker.init(testing.allocator, &r);
+
+    try testing.expectError(
+        DeserializeError.WrongFields,
+        message.unpack_as(OwningStruct),
+    );
 }

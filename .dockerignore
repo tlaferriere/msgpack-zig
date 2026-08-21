@@ -1,0 +1,6 @@
+# The dev image installs tools and mounts the worktree at run time; the only
+# sources it needs are the installer and the file that pins the Zig version.
+*
+!Dockerfile
+!build.zig.zon
+!scripts/install-zig.sh

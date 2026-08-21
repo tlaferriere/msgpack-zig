@@ -172,7 +172,7 @@ pub const Packer = struct {
 
     fn write_string_header(self: *Packer, len: usize) !void {
         const mark =
-            if (len < maxInt(u5))
+            if (len <= maxInt(u5))
                 Marker{ .FixStr = @intCast(len) }
             else if (len <= maxInt(u8))
                 Marker{ .Str_8 = 0 }
@@ -341,7 +341,23 @@ pub const Packer = struct {
     }
 
     fn write_ext(self: *Packer, object: anytype, ext: i8) !void {
-        const size = try @TypeOf(object).__msgpack__.packed_size(object);
+        // The length belongs in the header, ahead of the payload, so the payload
+        // has to exist before any of it can be written. Buffering it here is what
+        // keeps the two consistent: the header is computed from the bytes rather
+        // than from a second promise the type makes about them.
+        var payload_buffer: std.Io.Writer.Allocating = .init(self.allocator);
+        defer payload_buffer.deinit();
+        @TypeOf(object).__msgpack__.pack_ext(object, &payload_buffer.writer) catch |err| switch (err) {
+            // The only writer `pack_ext` was handed writes into memory, and
+            // `Allocating` reports a failed allocation as `WriteFailed`. Passing
+            // that up as-is would present running out of memory as a failure of
+            // the caller's writer, which has not been touched yet.
+            error.WriteFailed => return error.OutOfMemory,
+            else => |e| return e,
+        };
+        const payload = payload_buffer.written();
+
+        const size = payload.len;
         const mark =
             switch (size) {
                 1 => Marker{ .FixExt_1 = 0 },
@@ -352,7 +368,10 @@ pub const Packer = struct {
                 0, 3, 5...7, 9...15, 17...maxInt(u8) => Marker{ .Ext_8 = 0 },
                 maxInt(u8) + 1...maxInt(u16) => Marker{ .Ext_16 = 0 },
                 maxInt(u16) + 1...maxInt(u32) => Marker{ .Ext_32 = 0 },
-                else => unreachable,
+                // ext_32 is the widest header msgpack has, so a payload past
+                // `maxInt(u32)` has no way to be framed. Reachable wherever
+                // `usize` is wider than 32 bits.
+                else => return SerializeError.ExtTooLarge,
             };
 
         try self.writer.writeByte(marker.encode(mark));
@@ -375,8 +394,6 @@ pub const Packer = struct {
 
         try self.writer.writeByte(@bitCast(ext));
 
-        const custom_buffer = try @TypeOf(object).__msgpack__.pack_ext(object, self.allocator);
-        defer self.allocator.free(custom_buffer);
-        try self.writer.writeAll(custom_buffer);
+        try self.writer.writeAll(payload);
     }
 };

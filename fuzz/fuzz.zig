@@ -2,8 +2,8 @@
 //!
 //! Run with: `zig build test --release=safe --fuzz`
 //!
-//! When NOT in fuzz mode (`zig build test --release=safe`), these run as
-//! quick smoke tests with empty/corpus inputs.
+//! When NOT in fuzz mode (`zig build test`), these run as quick smoke tests
+//! with empty/corpus inputs, and any build mode will do.
 //!
 //! Fuzz targets:
 //!   1. Unpacker — feed arbitrary bytes, catch crashes. One target per family:
@@ -11,9 +11,26 @@
 //!   2. Structured round-trips — pack→unpack→verify for every supported type.
 //!   3. Mutation — pack a valid message, flip one byte, unpack.
 //!
-//! Note: `--release=safe` is required because Debug mode enables additional
-//! safety checks (e.g. bounds checking) that can cause false-positive panics
-//! when the fuzzer feeds deliberately malformed input.
+//! `--fuzz` fuzzes one test at a time, so an unfiltered run spends everything on
+//! whichever it picks first and leaves the rest at zero. Use `-Dfuzz-filter` to
+//! name a target, and rotate across them to cover the file:
+//!
+//!     zig build test --release=safe -Dfuzz-filter="round-trip ext" --fuzz
+//!
+//! In fuzz mode `--release=safe` is required, and the other modes fail for
+//! their own reasons. Debug does not compile — but only here, under `-ffuzz`:
+//! the failure is inside the test runner's `fuzz` entry point, which nothing
+//! references until a `testing.fuzz` target is built for fuzzing, which is why
+//! a plain `zig build test` in Debug is fine. That entry point hands
+//! `@errorReturnTrace()`'s `*builtin.StackTrace` to `std.debug.writeStackTrace`,
+//! which takes a `*const debug.StackTrace`. ReleaseSmall strips the debug info
+//! the fuzzer reads coverage from.
+//!
+//! ReleaseFast does build and run — do not use it. Safety checks are what most
+//! of these targets detect bugs *with*, and it turns them off. The timestamp
+//! overflow these tests found surfaced as an `@intCast` panic; under
+//! ReleaseFast the same cast is undefined behaviour and the target sails past
+//! it.
 const std = @import("std");
 const testing = std.testing;
 
@@ -37,25 +54,89 @@ fn roundTrip(comptime T: type, val: anytype) !T {
 
 /// Extension type with an opaque byte payload. Unlike `MyType` in the
 /// integration tests, this one accepts every payload, so round-trips are total.
+/// The unpacked value owns `buf`, so callers free it.
 const MyExt = struct {
     buf: []const u8,
 
     pub const __msgpack__ = struct {
         pub const repr = msgpack.Repr{ .ext = 0x71 };
 
-        pub fn pack_ext(self: MyExt, allocator: std.mem.Allocator) ![]const u8 {
-            const out = try allocator.alloc(u8, self.buf.len);
-            @memcpy(out, self.buf);
-            return out;
+        pub fn pack_ext(self: MyExt, writer: *std.Io.Writer) !void {
+            try writer.writeAll(self.buf);
         }
 
-        pub fn packed_size(self: MyExt) !usize {
-            return self.buf.len;
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MyExt {
+            return MyExt{ .buf = try reader.readAlloc(allocator, len) };
+        }
+    };
+};
+
+/// An `ext_32` frame header: the marker, a four-byte length, then the type id.
+const ext_32_header_len = 6;
+const ext_32_marker = 0xc9;
+
+/// How many bytes `MisreadExt`'s callback will try to take. The fuzzer sets it
+/// before each round; the library has to leave the stream positioned after the
+/// payload whether that is too much, too little, or exactly right.
+var misread_take: usize = 0;
+
+/// Extension type whose callback deliberately reads the wrong amount. It keeps
+/// nothing, so the value it returns does not matter — the point is where the
+/// stream is left once the callback is done with it.
+const MisreadExt = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = msgpack.Repr{ .ext = 0x72 };
+
+        pub fn pack_ext(self: MisreadExt, writer: *std.Io.Writer) !void {
+            try writer.writeAll(self.buf);
         }
 
-        pub fn unpack_ext(allocator: std.mem.Allocator, data: []const u8) !MyExt {
-            _ = allocator;
-            return MyExt{ .buf = data };
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !MisreadExt {
+            _ = len;
+            // Over-reading is supposed to fail rather than reach the next value,
+            // so failing here is a valid outcome, not a finding.
+            if (reader.readAlloc(allocator, misread_take)) |bytes| {
+                allocator.free(bytes);
+            } else |_| {}
+            return MisreadExt{ .buf = &.{} };
+        }
+    };
+};
+
+/// How many bytes `PartialExt`'s callback keeps. The fuzzer sets it before each
+/// round.
+var partial_take: usize = 0;
+
+/// Ext type whose callback keeps a fuzzer-chosen slice of its payload. Unlike
+/// `MisreadExt` this one allocates, so a frame the library cannot finish
+/// processing has something outstanding to strand.
+const PartialExt = struct {
+    buf: []const u8,
+
+    pub const __msgpack__ = struct {
+        pub const repr = msgpack.Repr{ .ext = 0x75 };
+
+        pub fn pack_ext(self: PartialExt, writer: *std.Io.Writer) !void {
+            try writer.writeAll(self.buf);
+        }
+
+        pub fn unpack_ext(
+            allocator: std.mem.Allocator,
+            reader: *std.Io.Reader,
+            len: usize,
+        ) !PartialExt {
+            const want = @min(partial_take, len);
+            return PartialExt{ .buf = try reader.readAlloc(allocator, want) };
         }
     };
 };
@@ -255,8 +336,8 @@ test "fuzz unpack maps" {
 
 // Feed random bytes to the Unpacker as user-defined types: a map-repr struct
 // (`unpack_map_as_struct`, which allocates a key string per field) and an
-// ext-repr struct (`unpack_ext`, which allocates the payload before handing
-// ownership to the callback).
+// ext-repr struct (`unpack_ext`, where the callback reads its own payload and
+// allocates whatever it decides to keep).
 test "fuzz unpack structs" {
     try testing.fuzz(
         {},
@@ -612,6 +693,98 @@ test "fuzz round-trip ext" {
                 const result = try roundTrip(MyExt, val);
                 defer testing.allocator.free(result.buf);
                 try testing.expectEqualStrings(val.buf, result.buf);
+            }
+        }.fuzz,
+        .{},
+    );
+}
+
+/// Largest ext payload the two targets below build, and the size of the buffer
+/// they build it in. Both draw reads of up to twice this, so asking a callback
+/// for more than its payload holds is always reachable.
+const max_ext_payload = 1024;
+
+// Keeping the stream aligned across an ext value is the library's job, not the
+// callback's. Draw a payload and an unrelated number of bytes for the callback
+// to take, then check the value *after* the ext still decodes: whatever the
+// callback read or declined to read, the next value has to start where it
+// should.
+test "fuzz ext callback misreads its payload" {
+    try testing.fuzz(
+        {},
+        struct {
+            fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
+                _ = ctx;
+
+                var payload: [max_ext_payload]u8 = undefined;
+                const len = smith.slice(&payload);
+                misread_take = smith.valueRangeAtMost(u32, 0, 2 * max_ext_payload);
+
+                var aw: std.Io.Writer.Allocating = .init(testing.allocator);
+                defer aw.deinit();
+                var packer = Packer.init(&aw.writer, testing.allocator);
+                try packer.pack(MisreadExt{ .buf = payload[0..len] });
+                try packer.pack(@as(u32, 0xDEADBEEF));
+                packer.finish();
+
+                var r = std.Io.Reader.fixed(aw.written());
+                var u = Unpacker.init(testing.allocator, &r);
+                _ = u.unpack_as(MisreadExt) catch {};
+                try testing.expectEqual(@as(u32, 0xDEADBEEF), try u.unpack_as(u32));
+            }
+        }.fuzz,
+        .{},
+    );
+}
+
+// Ext frames built by hand, with the declared length drawn independently of how
+// many payload bytes actually follow. Truncated frames, over-long frames and
+// zero-length ones all fall out of that, which the round-trip targets cannot
+// produce because they only ever emit headers that match their payload.
+//
+// The callback keeps a fuzzer-chosen part of the payload, so a frame the
+// library cannot finish has a live allocation at the moment it gives up —
+// which is the shape a truncated frame used to leak.
+test "fuzz adversarial ext frames" {
+    try testing.fuzz(
+        {},
+        struct {
+            fn fuzz(ctx: void, smith: *testing.Smith) anyerror!void {
+                _ = ctx;
+
+                var payload: [max_ext_payload]u8 = undefined;
+                const avail = smith.slice(&payload);
+                // Both drawn independently of `avail`, and allowed past it —
+                // a header promising more than the frame carries is the whole
+                // point of this target.
+                const over = 2 * max_ext_payload;
+                const declared = smith.valueRangeAtMost(u32, 0, over);
+                partial_take = smith.valueRangeAtMost(u32, 0, over);
+
+                // ext_32, so any drawn length is expressible in the header. The
+                // type id comes from the type itself rather than being written
+                // out again, so renumbering it cannot leave this behind.
+                const type_id: u8 = @bitCast(PartialExt.__msgpack__.repr.ext);
+                var frame: [ext_32_header_len + payload.len]u8 = undefined;
+                frame[0] = ext_32_marker;
+                std.mem.writeInt(u32, frame[1..5], declared, .big);
+                frame[5] = type_id;
+                @memcpy(frame[ext_32_header_len..][0..avail], payload[0..avail]);
+
+                // A private allocator per iteration, because `testing.allocator`
+                // only reports leaks when the test tears down — which never
+                // happens while the fuzzer is looping, so a leak inside an
+                // iteration would go unseen. This one is checked every round.
+                var gpa: std.heap.DebugAllocator(.{}) = .init;
+                const alloc = gpa.allocator();
+                {
+                    var r = std.Io.Reader.fixed(frame[0 .. ext_32_header_len + avail]);
+                    var u = Unpacker.init(alloc, &r);
+                    if (u.unpack_as(PartialExt)) |v| {
+                        alloc.free(v.buf);
+                    } else |_| {}
+                }
+                try testing.expect(gpa.deinit() == .ok);
             }
         }.fuzz,
         .{},

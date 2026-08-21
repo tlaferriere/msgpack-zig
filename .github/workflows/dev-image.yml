@@ -1,0 +1,102 @@
+name: Dev Image
+
+# Publishes the toolchain image to GHCR so it can be pulled instead of built.
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'scripts/install-zig.sh'
+      - 'build.zig.zon'
+      - '.github/workflows/dev-image.yml'
+  pull_request:
+    paths:
+      - 'Dockerfile'
+      - '.dockerignore'
+      - 'scripts/install-zig.sh'
+      - 'build.zig.zon'
+      - '.github/workflows/dev-image.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: dev-image-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  IMAGE: ghcr.io/${{ github.repository }}-dev
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    name: Build and Push
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@v4
+
+      # arm64 is emulated. The image only downloads and unpacks — it compiles
+      # nothing — so emulation costs little here.
+      - uses: docker/setup-qemu-action@v3
+      - uses: docker/setup-buildx-action@v3
+
+      # `--load` writes into the runner's image store under whatever tag it is
+      # given, so a fixed one would have every branch claiming the same name and
+      # smoke-testing whichever build landed last. Slashes are legal in a ref
+      # and not in a tag, so they fold to dashes.
+      - name: Derive a branch-scoped CI tag
+        run: echo "CI_TAG=ci-${GITHUB_REF_NAME//\//-}" >> "$GITHUB_ENV"
+
+      # Build the native arch first and load it, so the image is exercised on
+      # pull requests too. Nothing else proves the download URLs and the
+      # signature check still hold. The multi-arch build below reuses these
+      # layers from the cache.
+      - name: Build (amd64)
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          target: tools
+          platforms: linux/amd64
+          load: true
+          tags: ${{ env.IMAGE }}:${{ env.CI_TAG }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test the toolchain
+        run: |
+          docker run --rm -v "$PWD:/workspace" "${IMAGE}:${CI_TAG}" \
+            bash -c 'zig version && zls --version && zig build test --summary all'
+
+      - name: Log in to GHCR
+        if: github.event_name != 'pull_request'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Derive tags
+        id: meta
+        if: github.event_name != 'pull_request'
+        uses: docker/metadata-action@v5
+        with:
+          images: ${{ env.IMAGE }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,format=long
+
+      - name: Push
+        if: github.event_name != 'pull_request'
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          # The published image is the root one: it is meant to be a base image
+          # or a plain `docker run`, where a baked-in uid 1000 is a liability.
+          target: tools
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
